@@ -946,6 +946,15 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 		_set_scale_image_to_frame_compat(scribus, image_frame)
 		_apply_image_frame_style_compat(scribus, image_frame, image_border_rgb, image_border_width_pt)
 		if not is_full_page:
+			_set_text_flow_mode_compat(scribus, image_frame)
+			_set_text_distances_sides_compat(
+				scribus,
+				image_frame,
+				image_spacing_left,
+				image_spacing_right,
+				image_spacing_top_used,
+				image_spacing_bottom_used,
+			)
 			_create_wrap_frame_compat(
 				scribus,
 				f"chapter_{chapter_index}_image_{image_index}",
