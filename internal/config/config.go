@@ -10,21 +10,28 @@ import (
 )
 
 type Config struct {
-	PageWidth       float64
-	PageHeight      float64
-	MarginTop       float64
-	MarginLeft      float64
-	MarginRight     float64
-	MarginBottom    float64
-	PageLayout      string
-	FirstPage       string
-	DocumentUnits   string
-	PageSize        string
-	PageOrientation string
-	BleedTop        float64
-	BleedBottom     float64
-	BleedInside     float64
-	BleedOutside    float64
+	PageWidth         float64
+	PageHeight        float64
+	MarginTop         float64
+	MarginLeft        float64
+	MarginRight       float64
+	MarginBottom      float64
+	PageLayout        string
+	FirstPage         string
+	DocumentUnits     string
+	PageSize          string
+	PageOrientation   string
+	PageBackgroundRGB *[3]int
+	BleedTop          float64
+	BleedBottom       float64
+	BleedInside       float64
+	BleedOutside      float64
+	ImageBorderRGB    [3]int
+	ImageBorderPt     float64
+	ImageSpaceTop     float64
+	ImageSpaceBottom  float64
+	ImageSpaceInside  float64
+	ImageSpaceOutside float64
 }
 
 func Default() Config {
@@ -54,12 +61,13 @@ type templateConfigFile struct {
 		FirstPage string `yaml:"first_page"`
 	} `yaml:"document"`
 	Page struct {
-		WidthMM     float64 `yaml:"width_mm"`
-		HeightMM    float64 `yaml:"height_mm"`
-		Size        string  `yaml:"size"`
-		Orientation string  `yaml:"orientation"`
-		Layout      string  `yaml:"layout"`
-		FirstPage   string  `yaml:"first_page"`
+		WidthMM            float64 `yaml:"width_mm"`
+		HeightMM           float64 `yaml:"height_mm"`
+		Size               string  `yaml:"size"`
+		Orientation        string  `yaml:"orientation"`
+		Layout             string  `yaml:"layout"`
+		FirstPage          string  `yaml:"first_page"`
+		BackgroundColorRGB *[3]int `yaml:"background_color_rgb"`
 	} `yaml:"page"`
 	Bleed struct {
 		Top     float64 `yaml:"top"`
@@ -73,6 +81,18 @@ type templateConfigFile struct {
 		Inside  float64 `yaml:"inside"`
 		Outside float64 `yaml:"outside"`
 	} `yaml:"safety_margin"`
+	Images struct {
+		Border struct {
+			ColorRGB [3]int  `yaml:"color_rgb"`
+			WidthPt  float64 `yaml:"width_pt"`
+		} `yaml:"border"`
+		SpacingMM struct {
+			Top     float64 `yaml:"top"`
+			Bottom  float64 `yaml:"bottom"`
+			Inside  float64 `yaml:"inside"`
+			Outside float64 `yaml:"outside"`
+		} `yaml:"spacing_mm"`
+	} `yaml:"images"`
 }
 
 func LoadForBook(bookDir string) (Config, error) {
@@ -117,6 +137,9 @@ func LoadForBook(bookDir string) (Config, error) {
 	cfg.FirstPage = defaultString(firstNonEmpty(templateFile.Document.FirstPage, templateFile.Page.FirstPage), cfg.FirstPage)
 	cfg.PageSize = defaultString(templateFile.Page.Size, cfg.PageSize)
 	cfg.PageOrientation = defaultString(templateFile.Page.Orientation, cfg.PageOrientation)
+	if templateFile.Page.BackgroundColorRGB != nil {
+		cfg.PageBackgroundRGB = templateFile.Page.BackgroundColorRGB
+	}
 
 	if templateFile.Page.WidthMM > 0 && templateFile.Page.HeightMM > 0 {
 		cfg.PageWidth = templateFile.Page.WidthMM
@@ -149,6 +172,24 @@ func LoadForBook(bookDir string) (Config, error) {
 	}
 	if templateFile.Bleed.Outside > 0 {
 		cfg.BleedOutside = templateFile.Bleed.Outside
+	}
+	if templateFile.Images.Border.ColorRGB != [3]int{} {
+		cfg.ImageBorderRGB = templateFile.Images.Border.ColorRGB
+	}
+	if templateFile.Images.Border.WidthPt > 0 {
+		cfg.ImageBorderPt = templateFile.Images.Border.WidthPt
+	}
+	if templateFile.Images.SpacingMM.Top > 0 {
+		cfg.ImageSpaceTop = templateFile.Images.SpacingMM.Top
+	}
+	if templateFile.Images.SpacingMM.Bottom > 0 {
+		cfg.ImageSpaceBottom = templateFile.Images.SpacingMM.Bottom
+	}
+	if templateFile.Images.SpacingMM.Inside > 0 {
+		cfg.ImageSpaceInside = templateFile.Images.SpacingMM.Inside
+	}
+	if templateFile.Images.SpacingMM.Outside > 0 {
+		cfg.ImageSpaceOutside = templateFile.Images.SpacingMM.Outside
 	}
 
 	return cfg, nil

@@ -6,6 +6,7 @@ document:
 page:
   size: A4
   orientation: landscape
+  background_color_rgb: [248, 244, 232]
 
 bleed:
   top: 3.18

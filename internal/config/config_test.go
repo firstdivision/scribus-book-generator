@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -34,8 +35,41 @@ func TestLoadForBookFromTemplate(t *testing.T) {
 	if cfg.PageOrientation != "landscape" {
 		t.Fatalf("expected page orientation landscape, got %q", cfg.PageOrientation)
 	}
+	if cfg.PageBackgroundRGB == nil {
+		t.Fatalf("expected page background color to be loaded")
+	}
+	if *cfg.PageBackgroundRGB != [3]int{200, 200, 200} {
+		t.Fatalf("expected page background rgb [200 200 200], got %v", *cfg.PageBackgroundRGB)
+	}
 	if cfg.MarginTop != 12.7 || cfg.MarginBottom != 12.7 || cfg.MarginLeft != 12.7 || cfg.MarginRight != 12.7 {
 		t.Fatalf("expected 12.7mm safety margins, got top=%.2f left=%.2f right=%.2f bottom=%.2f", cfg.MarginTop, cfg.MarginLeft, cfg.MarginRight, cfg.MarginBottom)
+	}
+}
+
+func TestLoadForBookSupportsNullPageBackground(t *testing.T) {
+	bookDir := t.TempDir()
+	templateDir := filepath.Join(bookDir, "templates", "lulu")
+	if err := os.MkdirAll(templateDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+
+	bookConfig := []byte("template: a4-landscape.yaml\n")
+	if err := os.WriteFile(filepath.Join(bookDir, "book.yaml"), bookConfig, 0o644); err != nil {
+		t.Fatalf("WriteFile book.yaml returned error: %v", err)
+	}
+
+	template := []byte("document:\n  units: mm\npage:\n  size: A4\n  orientation: landscape\n  background_color_rgb: null\n")
+	if err := os.WriteFile(filepath.Join(templateDir, "a4-landscape.yaml"), template, 0o644); err != nil {
+		t.Fatalf("WriteFile template returned error: %v", err)
+	}
+
+	cfg, err := LoadForBook(bookDir)
+	if err != nil {
+		t.Fatalf("LoadForBook returned error: %v", err)
+	}
+
+	if cfg.PageBackgroundRGB != nil {
+		t.Fatalf("expected nil page background rgb, got %v", *cfg.PageBackgroundRGB)
 	}
 }
 

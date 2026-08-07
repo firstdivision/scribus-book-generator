@@ -222,6 +222,31 @@ def _set_text_distances_compat(scribus, frame_name, distance):
 		return
 
 
+def _set_text_distances_sides_compat(scribus, frame_name, left, right, top, bottom):
+	if not hasattr(scribus, "setTextDistances"):
+		return
+
+	try:
+		scribus.setTextDistances(left, right, top, bottom, frame_name)
+		return
+	except Exception:
+		pass
+
+	try:
+		scribus.setTextDistances(frame_name, left, right, top, bottom)
+	except Exception:
+		return
+
+
+def _create_rect_compat(scribus, x, y, width, height, name):
+	if not hasattr(scribus, "createRect"):
+		raise RuntimeError("No compatible Scribus rectangle API found")
+	try:
+		return scribus.createRect(x, y, width, height, name)
+	except TypeError:
+		return scribus.createRect(x, y, width, height)
+
+
 def _document_page_size_compat(scribus, fallback_page_size):
 	if hasattr(scribus, "getPageSize"):
 		try:
@@ -234,6 +259,157 @@ def _document_page_size_compat(scribus, fallback_page_size):
 	return fallback_page_size
 
 
+def _rgb_color_name(rgb_values):
+	return f"image_border_{rgb_values[0]}_{rgb_values[1]}_{rgb_values[2]}"
+
+
+def _ensure_rgb_color_compat(scribus, rgb_values):
+	color_name = _rgb_color_name(rgb_values)
+	if hasattr(scribus, "getColorNames"):
+		try:
+			if color_name in scribus.getColorNames():
+				return color_name
+		except Exception:
+			pass
+
+	if hasattr(scribus, "defineColorRGB"):
+		try:
+			scribus.defineColorRGB(color_name, rgb_values[0], rgb_values[1], rgb_values[2])
+			return color_name
+		except Exception:
+			pass
+
+	return color_name
+
+
+def _apply_image_frame_style_compat(scribus, frame_name, border_rgb, border_width_pt):
+	if border_width_pt <= 0:
+		return
+
+	color_name = _ensure_rgb_color_compat(scribus, border_rgb)
+	if hasattr(scribus, "setLineColor"):
+		try:
+			scribus.setLineColor(color_name, frame_name)
+		except Exception:
+			pass
+
+	if hasattr(scribus, "setLineWidth"):
+		try:
+			scribus.setLineWidth(border_width_pt, frame_name)
+		except Exception:
+			pass
+
+
+def _page_is_right_compat(layout_mode, first_page_mode, page_number):
+	if layout_mode != "facing_pages":
+		return True
+	first_page_is_right = first_page_mode == "right"
+	if first_page_is_right:
+		return page_number % 2 == 1
+	return page_number % 2 == 0
+
+
+def _master_page_name_for_page(layout_mode, first_page_mode, page_number):
+	if layout_mode != "facing_pages":
+		return "Body"
+	if _page_is_right_compat(layout_mode, first_page_mode, page_number):
+		return "Body Right"
+	return "Body Left"
+
+
+def _apply_master_page_compat(scribus, master_page_name, page_number):
+	if not master_page_name or not hasattr(scribus, "applyMasterPage"):
+		return
+	try:
+		scribus.applyMasterPage(master_page_name, page_number)
+	except Exception:
+		return
+
+
+def _create_background_master_compat(scribus, master_page_name, background_rgb, left_bleed, right_bleed, top_bleed, bottom_bleed, fallback_page_size):
+	if background_rgb is None:
+		return
+	if not hasattr(scribus, "createMasterPage") or not hasattr(scribus, "closeMasterPage"):
+		return
+
+	scribus.createMasterPage(master_page_name)
+	page_width, page_height = _document_page_size_compat(scribus, fallback_page_size)
+	color_name = _ensure_rgb_color_compat(scribus, background_rgb)
+	background_name = f"{master_page_name}_background"
+	background = _create_rect_compat(
+		scribus,
+		-left_bleed,
+		-top_bleed,
+		page_width + left_bleed + right_bleed,
+		page_height + top_bleed + bottom_bleed,
+		background_name,
+	)
+	if hasattr(scribus, "setFillColor"):
+		try:
+			scribus.setFillColor(color_name, background)
+		except Exception:
+			pass
+	if hasattr(scribus, "setLineColor"):
+		try:
+			scribus.setLineColor("None", background)
+		except Exception:
+			pass
+	if hasattr(scribus, "setLineWidth"):
+		try:
+			scribus.setLineWidth(0, background)
+		except Exception:
+			pass
+	scribus.closeMasterPage()
+
+
+def _page_horizontal_bleeds(layout_mode, first_page_mode, page_number, bleed_inside, bleed_outside):
+	if layout_mode != "facing_pages":
+		return bleed_outside, bleed_outside
+	if _page_is_right_compat(layout_mode, first_page_mode, page_number):
+		return bleed_inside, bleed_outside
+	return bleed_outside, bleed_inside
+
+
+def _create_page_background_compat(scribus, page_number, layout_mode, first_page_mode, background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, fallback_page_size):
+	if background_rgb is None:
+		return
+
+	left_bleed, right_bleed = _page_horizontal_bleeds(layout_mode, first_page_mode, page_number, bleed_inside, bleed_outside)
+	page_width, page_height = _document_page_size_compat(scribus, fallback_page_size)
+	color_name = _ensure_rgb_color_compat(scribus, background_rgb)
+	background_name = f"page_{page_number}_background"
+	background = _create_rect_compat(
+		scribus,
+		-left_bleed,
+		-bleed_top,
+		page_width + left_bleed + right_bleed,
+		page_height + bleed_top + bleed_bottom,
+		background_name,
+	)
+	if hasattr(scribus, "setFillColor"):
+		try:
+			scribus.setFillColor(color_name, background)
+		except Exception:
+			pass
+	if hasattr(scribus, "setLineColor"):
+		try:
+			scribus.setLineColor("None", background)
+		except Exception:
+			pass
+	if hasattr(scribus, "setLineWidth"):
+		try:
+			scribus.setLineWidth(0, background)
+		except Exception:
+			pass
+
+
+def _append_body_page_compat(scribus, current_page, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size):
+	_append_page_compat(scribus)
+	current_page += 1
+	_create_page_background_compat(scribus, current_page, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size)
+	return current_page
+
+
 def _estimate_body_pages(body_text):
 	chars_per_page = 1700
 	if not body_text:
@@ -242,16 +418,24 @@ def _estimate_body_pages(body_text):
 	return max(1, min(40, estimated))
 
 
-def _append_page_compat(scribus):
+def _append_page_compat(scribus, master_page_name=None):
 	if hasattr(scribus, "newPage"):
-		for args in ((-1,), (1,), tuple()):
+		page_args = []
+		if master_page_name:
+			page_args.extend(((-1, master_page_name), (1, master_page_name)))
+		page_args.extend(((-1,), (1,), tuple()))
+		for args in page_args:
 			try:
 				scribus.newPage(*args)
 				return
 			except TypeError:
 				continue
 	if hasattr(scribus, "createPage"):
-		for args in ((-1,), (1,), tuple()):
+		page_args = []
+		if master_page_name:
+			page_args.extend(((-1, master_page_name), (1, master_page_name)))
+		page_args.extend(((-1,), (1,), tuple()))
+		for args in page_args:
 			try:
 				scribus.createPage(*args)
 				return
@@ -291,28 +475,25 @@ def _text_overflows_compat(scribus, frame_name):
 		return False
 
 
-def _start_chapter_on_right_page_compat(scribus, current_page):
+def _start_chapter_on_right_page_compat(scribus, current_page, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size):
 	if current_page % 2 == 1:
-		_append_page_compat(scribus)
-		current_page += 1
+		current_page = _append_body_page_compat(scribus, current_page, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size)
 
-	_append_page_compat(scribus)
-	current_page += 1
+	current_page = _append_body_page_compat(scribus, current_page, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size)
 	return current_page
 
 
 
-def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_index, start_page, page_size, margins):
+def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_index, start_page, page_size, margins, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, image_border_rgb, image_border_width_pt, image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside):
 	page_width, page_height = _document_page_size_compat(scribus, page_size)
 	margin_top, margin_left, margin_right, margin_bottom = margins
 
 	content_width = page_width - margin_left - margin_right
 	title_height = 64.0
-	body_top = margin_top + title_height + 12.0
-	body_height = page_height - body_top - margin_bottom
-	chapter_image_width = content_width * 0.72
-	chapter_image_top = body_top + 20.0
-	chapter_image_gap = 20.0
+	chapter_opening_body_top = margin_top + title_height + 12.0
+	chapter_opening_body_height = page_height - chapter_opening_body_top - margin_bottom
+	continuation_body_top = margin_top
+	continuation_body_height = page_height - continuation_body_top - margin_bottom
 	chapter_image_cursor = start_page
 
 	title_frame = _create_text_frame_compat(
@@ -326,32 +507,47 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 	body_frame = _create_text_frame_compat(
 		scribus,
 		margin_left,
-		body_top,
+		chapter_opening_body_top,
 		content_width,
-		body_height,
+		chapter_opening_body_height,
 		f"chapter_{chapter_index}_body",
 	)
 	body_frames = [body_frame]
 
 	for image_index, image_path in enumerate(image_paths, start=1):
 		if image_index > 1:
-			_append_page_compat(scribus)
-			chapter_image_cursor += 1
+			chapter_image_cursor = _append_body_page_compat(scribus, chapter_image_cursor, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size)
 			_goto_page_compat(scribus, chapter_image_cursor)
 
-		image_width, image_height = _image_dimensions_compat(image_path)
-		if image_width > 0 and image_height > 0:
-			frame_height = min(260.0, body_height * 0.45)
-			frame_width = frame_height * (float(image_width) / float(image_height))
-			if frame_width > chapter_image_width:
-				frame_width = chapter_image_width
-				frame_height = frame_width * (float(image_height) / float(image_width))
+		if layout_mode == "facing_pages" and _page_is_right_compat(layout_mode, first_page_mode, chapter_image_cursor):
+			image_spacing_left = image_spacing_inside
+			image_spacing_right = image_spacing_outside
 		else:
-			frame_width = chapter_image_width
-			frame_height = min(260.0, body_height * 0.45)
+			image_spacing_left = image_spacing_outside
+			image_spacing_right = image_spacing_inside
 
-		image_x = margin_left + ((content_width - frame_width) / 2.0)
-		image_y = chapter_image_top + ((body_height - frame_height) / 2.0)
+		if chapter_image_cursor == start_page:
+			image_body_top = chapter_opening_body_top
+			image_body_height = chapter_opening_body_height
+		else:
+			image_body_top = continuation_body_top
+			image_body_height = continuation_body_height
+
+		image_width, image_height = _image_dimensions_compat(image_path)
+		available_width = content_width - image_spacing_left - image_spacing_right
+		available_height = image_body_height - image_spacing_top - image_spacing_bottom
+		if image_width > 0 and image_height > 0:
+			frame_width = available_width
+			frame_height = frame_width * (float(image_height) / float(image_width))
+			if frame_height > available_height:
+				frame_height = available_height
+				frame_width = frame_height * (float(image_width) / float(image_height))
+		else:
+			frame_width = available_width
+			frame_height = available_height
+
+		image_x = margin_left + image_spacing_left + ((available_width - frame_width) / 2.0)
+		image_y = image_body_top + image_spacing_top + ((available_height - frame_height) / 2.0)
 
 		image_frame = _create_image_frame_compat(
 			scribus,
@@ -364,7 +560,8 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 		_load_image_compat(scribus, image_path, image_frame)
 		_set_scale_image_to_frame_compat(scribus, image_frame)
 		_set_text_flow_mode_compat(scribus, image_frame)
-		_set_text_distances_compat(scribus, image_frame, 12.0)
+		_apply_image_frame_style_compat(scribus, image_frame, image_border_rgb, image_border_width_pt)
+		_set_text_distances_sides_compat(scribus, image_frame, image_spacing_left, image_spacing_right, image_spacing_top, image_spacing_bottom)
 
 	_set_frame_text_compat(scribus, title_frame, title_text)
 	_set_frame_text_compat(scribus, body_frame, body_text)
@@ -374,16 +571,15 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 	# If Scribus reports overflow, grow the chain incrementally.
 	max_extra_pages = 20
 	while _text_overflows_compat(scribus, body_frames[-1]) and max_extra_pages > 0:
-		_append_page_compat(scribus)
-		current_page += 1
+		current_page = _append_body_page_compat(scribus, current_page, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size)
 		_goto_page_compat(scribus, current_page)
 		next_page_number = len(body_frames) + 1
 		next_frame = _create_text_frame_compat(
 			scribus,
 			margin_left,
-			body_top,
+			continuation_body_top,
 			content_width,
-			body_height,
+			continuation_body_height,
 			f"chapter_{chapter_index}_body_{next_page_number}",
 		)
 		_link_text_frames_compat(scribus, body_frames[-1], next_frame)
@@ -411,6 +607,17 @@ def main() -> int:
 		__MARGIN_BOTTOM_POINTS__,
 	)
 	page_size_constant = "__PAGE_SIZE_CONSTANT__"
+	page_background_rgb = __PAGE_BACKGROUND_RGB__
+	bleed_top = __BLEED_TOP_POINTS__
+	bleed_bottom = __BLEED_BOTTOM_POINTS__
+	bleed_inside = __BLEED_INSIDE_POINTS__
+	bleed_outside = __BLEED_OUTSIDE_POINTS__
+	image_border_rgb = (__IMAGE_BORDER_RED__, __IMAGE_BORDER_GREEN__, __IMAGE_BORDER_BLUE__)
+	image_border_width_pt = __IMAGE_BORDER_WIDTH_PT__
+	image_spacing_top = __IMAGE_SPACING_TOP_POINTS__
+	image_spacing_bottom = __IMAGE_SPACING_BOTTOM_POINTS__
+	image_spacing_inside = __IMAGE_SPACING_INSIDE_POINTS__
+	image_spacing_outside = __IMAGE_SPACING_OUTSIDE_POINTS__
 	layout_mode = "__LAYOUT_MODE__"
 	first_page_mode = "__FIRST_PAGE_MODE__"
 	if not chapters_dir.exists():
@@ -457,6 +664,7 @@ def main() -> int:
 			first_page_mode,
 			page_size_constant,
 		)
+		_create_page_background_compat(scribus, 1, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size)
 		title = chapters[0][0] or book_dir.name
 		if hasattr(scribus, "setDocTitle"):
 			scribus.setDocTitle(title)
@@ -465,7 +673,7 @@ def main() -> int:
 		for index, chapter_data in enumerate(chapters, start=1):
 			chapter_title, chapter_body, chapter_images = chapter_data
 			if index > 1:
-				current_page = _start_chapter_on_right_page_compat(scribus, current_page)
+				current_page = _start_chapter_on_right_page_compat(scribus, current_page, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size)
 				_goto_page_compat(scribus, current_page)
 
 			current_page = _render_basic_content(
@@ -477,6 +685,19 @@ def main() -> int:
 				current_page,
 				page_size,
 				margins,
+				layout_mode,
+				first_page_mode,
+				page_background_rgb,
+				bleed_inside,
+				bleed_outside,
+				bleed_top,
+				bleed_bottom,
+				image_border_rgb,
+				image_border_width_pt,
+				image_spacing_top,
+				image_spacing_bottom,
+				image_spacing_inside,
+				image_spacing_outside,
 			)
 
 		_goto_page_compat(scribus, 1)
@@ -503,6 +724,11 @@ if __name__ == "__main__":
 `
 
 func generateScribusScript(cfg config.Config) string {
+	pageBackgroundRGB := "None"
+	if cfg.PageBackgroundRGB != nil {
+		pageBackgroundRGB = fmt.Sprintf("(%d, %d, %d)", cfg.PageBackgroundRGB[0], cfg.PageBackgroundRGB[1], cfg.PageBackgroundRGB[2])
+	}
+
 	replacer := strings.NewReplacer(
 		"__PAGE_WIDTH_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.PageWidth)),
 		"__PAGE_HEIGHT_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.PageHeight)),
@@ -510,6 +736,19 @@ func generateScribusScript(cfg config.Config) string {
 		"__MARGIN_LEFT_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.MarginLeft)),
 		"__MARGIN_RIGHT_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.MarginRight)),
 		"__MARGIN_BOTTOM_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.MarginBottom)),
+		"__PAGE_BACKGROUND_RGB__", pageBackgroundRGB,
+		"__BLEED_TOP_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.BleedTop)),
+		"__BLEED_BOTTOM_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.BleedBottom)),
+		"__BLEED_INSIDE_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.BleedInside)),
+		"__BLEED_OUTSIDE_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.BleedOutside)),
+		"__IMAGE_BORDER_RED__", fmt.Sprintf("%d", cfg.ImageBorderRGB[0]),
+		"__IMAGE_BORDER_GREEN__", fmt.Sprintf("%d", cfg.ImageBorderRGB[1]),
+		"__IMAGE_BORDER_BLUE__", fmt.Sprintf("%d", cfg.ImageBorderRGB[2]),
+		"__IMAGE_BORDER_WIDTH_PT__", fmt.Sprintf("%.4f", cfg.ImageBorderPt),
+		"__IMAGE_SPACING_TOP_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.ImageSpaceTop)),
+		"__IMAGE_SPACING_BOTTOM_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.ImageSpaceBottom)),
+		"__IMAGE_SPACING_INSIDE_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.ImageSpaceInside)),
+		"__IMAGE_SPACING_OUTSIDE_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.ImageSpaceOutside)),
 		"__PAGE_SIZE_CONSTANT__", fmt.Sprintf("PAPER_%s", strings.ToUpper(strings.ReplaceAll(cfg.PageSize, " ", "_"))),
 		"__LAYOUT_MODE__", cfg.PageLayout,
 		"__FIRST_PAGE_MODE__", cfg.FirstPage,
