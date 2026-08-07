@@ -23,7 +23,7 @@ safety_margin:
 images:
   border:
     color_rgb: [255, 255, 255]
-    width_pt: 3
+    width_pt: 15
 
   spacing_mm:
     top: 5

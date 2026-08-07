@@ -833,7 +833,7 @@ def main() -> int:
 	bleed_inside = 9.0142
 	bleed_outside = 9.0142
 	image_border_rgb = (255, 255, 255)
-	image_border_width_pt = 3.0000
+	image_border_width_pt = 15.0000
 	image_spacing_top = 14.1732
 	image_spacing_bottom = 14.1732
 	image_spacing_inside = 14.1732
