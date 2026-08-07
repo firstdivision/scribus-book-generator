@@ -1,0 +1,25 @@
+{
+    "images": [
+        {
+            "file": "chapters/1-the-road-to-san-rosario/the-road.png",
+            "placement": "inline",
+            "snap_edge": "outside"
+        },
+        {
+            "file": "chapters/1-the-road-to-san-rosario/sunset-at-hotel-rosario.png",
+            "placement": "inline",
+            "snap_edge": "top",
+            "width_mm": 140
+        },
+        {
+            "file": "chapters/2-the-people-who-stayed/desert-mission-at-golden-hour.png",
+            "placement": "inline",
+            "height_mm": 90
+        },
+        {
+            "file": "chapters/2-the-people-who-stayed/sunset-gathering-at-hotel-rosario.png",
+            "placement": "full_page",
+            "bleed": true
+        }
+    ]
+}

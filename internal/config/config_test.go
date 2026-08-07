@@ -70,6 +70,15 @@ func TestLoadForBookFromTemplate(t *testing.T) {
 	if cfg.MarginTop != 12.7 || cfg.MarginBottom != 12.7 || cfg.MarginLeft != 12.7 || cfg.MarginRight != 12.7 {
 		t.Fatalf("expected 12.7mm safety margins, got top=%.2f left=%.2f right=%.2f bottom=%.2f", cfg.MarginTop, cfg.MarginLeft, cfg.MarginRight, cfg.MarginBottom)
 	}
+	if cfg.Images.Sizing.MaxWidthMM != 110 || cfg.Images.Sizing.MaxHeightMM != 100 {
+		t.Fatalf("expected image sizing defaults 110x100mm, got %+v", cfg.Images.Sizing)
+	}
+	if !cfg.Images.Placement.SnapToEdge {
+		t.Fatalf("expected images.placement.snap_to_edge to be true")
+	}
+	if cfg.Images.Placement.SnapTarget != ImageSnapTargetContentArea {
+		t.Fatalf("expected snap_target content_area, got %q", cfg.Images.Placement.SnapTarget)
+	}
 }
 
 func TestLoadForBookSupportsNullPageBackground(t *testing.T) {
@@ -132,5 +141,26 @@ func TestLoadForBookRejectsInvalidPageNumberConfig(t *testing.T) {
 
 	if _, err := LoadForBook(bookDir); err == nil {
 		t.Fatalf("expected invalid page number config to return an error")
+	}
+}
+
+func TestLoadForBookRejectsInvalidImageConfig(t *testing.T) {
+	bookDir := t.TempDir()
+	templateDir := filepath.Join(bookDir, "templates", "lulu")
+	if err := os.MkdirAll(templateDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(bookDir, "book.yaml"), []byte("template: a4-landscape.yaml\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile book.yaml returned error: %v", err)
+	}
+
+	template := []byte("document:\n  units: mm\npage:\n  size: A4\n  orientation: landscape\nimages:\n  sizing:\n    max_width_mm: -1\n  placement:\n    allowed_edges: [outside]\n    preferred_edges: [inside]\n")
+	if err := os.WriteFile(filepath.Join(templateDir, "a4-landscape.yaml"), template, 0o644); err != nil {
+		t.Fatalf("WriteFile template returned error: %v", err)
+	}
+
+	if _, err := LoadForBook(bookDir); err == nil {
+		t.Fatalf("expected invalid image config to return an error")
 	}
 }

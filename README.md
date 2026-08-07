@@ -102,6 +102,23 @@ images:
 		inside: 5
 		outside: 5
 
+	sizing:
+		max_width_mm: 110
+		max_height_mm: 100
+
+	placement:
+		snap_to_edge: true
+		snap_target: content_area
+		allowed_edges:
+			- outside
+			- inside
+			- top
+			- bottom
+		preferred_edges:
+			- outside
+			- top
+		edge_gap_mm: 0
+
 page_numbers:
 	enabled: true
 	start_on_page: 1
@@ -182,6 +199,46 @@ Controls image frame styling and the text wrap spacing around image frames.
 #### `images.spacing_mm`
 
 - `top`, `bottom`, `inside`, `outside`: image-to-text spacing in millimeters
+
+#### `images.sizing`
+
+- `max_width_mm`: default maximum inline-image width (`> 0`)
+- `max_height_mm`: default maximum inline-image height (`> 0`)
+
+Sizing is contain-fit by default and always preserves source aspect ratio.
+
+#### `images.placement`
+
+- `snap_to_edge`: `true` or `false`
+- `snap_target`: `content_area`, `trim`, or `bleed`
+- `allowed_edges`: list of `outside`, `inside`, `top`, `bottom`
+- `preferred_edges`: ordered subset of `allowed_edges`
+- `edge_gap_mm`: inward gap from selected snap edge (`>= 0`)
+
+For facing pages:
+
+- left page: `outside=left`, `inside=right`
+- right page: `outside=right`, `inside=left`
+
+Text wrap spacing remains separate from edge snap.
+
+### `layout.json` image overrides
+
+Book-level defaults come from template YAML, but individual images in `layout.json` can override:
+
+- `snap_edge`
+- `width_mm`
+- `height_mm`
+- `placement` (`inline` or `full_page`)
+- `bleed`
+
+Precedence is:
+
+1. explicit `layout.json` instruction
+2. YAML image defaults
+3. built-in defaults
+
+If both `width_mm` and `height_mm` are set for an image, they are treated as a contain-fit bounding box (still preserving aspect ratio).
 
 ### `page_numbers`
 

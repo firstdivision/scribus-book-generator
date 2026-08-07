@@ -1,6 +1,7 @@
 {
     "chat.tools.terminal.autoApprove": {
         "go": true,
-        "scribus": true
+        "scribus": true,
+        "gofmt": true
     }
 }

@@ -9,12 +9,14 @@ import (
 	"strings"
 
 	"scribus-book-generator/internal/config"
+	"scribus-book-generator/internal/layout/layoutplan"
 	"scribus-book-generator/internal/markdown"
 )
 
 const generatedScribusScriptPath = "scripts/scribus_generate.py"
 
 const generatedScribusScriptTemplate = `#!/usr/bin/env python3
+import json
 import sys
 from pathlib import Path
 
@@ -237,6 +239,121 @@ def _set_text_distances_sides_compat(scribus, frame_name, left, right, top, bott
 		scribus.setTextDistances(frame_name, left, right, top, bottom)
 	except Exception:
 		return
+
+
+def _mm_to_points(value_mm):
+	return float(value_mm) * 72.0 / 25.4
+
+
+def _normalize_path_key(path_value):
+	return str(Path(path_value)).replace("\\", "/")
+
+
+def _build_layout_index(layout_plan):
+	index = {}
+	for entry in layout_plan.get("images", []):
+		source = entry.get("file") or entry.get("src")
+		if not source:
+			continue
+		index[_normalize_path_key(source)] = entry
+	return index
+
+
+def _resolve_image_instruction(layout_index, book_dir, image_path):
+	image_resolved = image_path.resolve()
+	candidates = [_normalize_path_key(image_resolved)]
+	try:
+		candidates.append(_normalize_path_key(image_resolved.relative_to(book_dir)))
+	except ValueError:
+		pass
+	candidates.append(_normalize_path_key(image_path))
+
+	for candidate in candidates:
+		if candidate in layout_index:
+			return layout_index[candidate]
+
+	best = None
+	best_len = -1
+	for key, value in layout_index.items():
+		for candidate in candidates:
+			if candidate.endswith(key) and len(key) > best_len:
+				best = value
+				best_len = len(key)
+	return best
+
+
+def _fit_contain_dimensions(source_width, source_height, max_width, max_height):
+	if source_width <= 0 or source_height <= 0 or max_width <= 0 or max_height <= 0:
+		return max(max_width, 1.0), max(max_height, 1.0)
+	scale = min(max_width / float(source_width), max_height / float(source_height))
+	return float(source_width) * scale, float(source_height) * scale
+
+
+def _resolve_wrap_spacing(is_right_page, spacing_inside, spacing_outside, spacing_top, spacing_bottom):
+	if is_right_page:
+		return spacing_inside, spacing_outside, spacing_top, spacing_bottom
+	return spacing_outside, spacing_inside, spacing_top, spacing_bottom
+
+
+def _resolve_snap_rect(snap_target, content_rect, trim_rect, bleed_rect):
+	if snap_target == "trim":
+		return trim_rect
+	if snap_target == "bleed":
+		return bleed_rect
+	return content_rect
+
+
+def _resolve_semantic_edge(edge_name, is_right_page):
+	if edge_name == "outside":
+		return "right" if is_right_page else "left"
+	if edge_name == "inside":
+		return "left" if is_right_page else "right"
+	if edge_name == "top":
+		return "top"
+	if edge_name == "bottom":
+		return "bottom"
+	raise RuntimeError(f"unsupported image edge: {edge_name}")
+
+
+def _choose_snap_edge(explicit_edge, allowed_edges, preferred_edges):
+	allowed_set = set(allowed_edges)
+	if explicit_edge is not None:
+		if explicit_edge not in allowed_set:
+			raise RuntimeError(f"layout.json snap_edge '{explicit_edge}' is not allowed by images.placement.allowed_edges")
+		return explicit_edge
+
+	for edge in preferred_edges:
+		if edge in allowed_set:
+			return edge
+
+	if allowed_edges:
+		return allowed_edges[0]
+	raise RuntimeError("images.placement.allowed_edges must not be empty")
+
+
+def _snap_frame_to_edge(snap_rect, frame_width, frame_height, physical_edge, edge_gap, is_right_page):
+	left, top, rect_width, rect_height = snap_rect
+	if physical_edge == "left":
+		return left + edge_gap, top + edge_gap
+	if physical_edge == "right":
+		return left + rect_width - frame_width - edge_gap, top + edge_gap
+	if physical_edge == "top":
+		x = left + rect_width - frame_width if is_right_page else left
+		return x, top + edge_gap
+	if physical_edge == "bottom":
+		x = left + rect_width - frame_width if is_right_page else left
+		return x, top + rect_height - frame_height - edge_gap
+	raise RuntimeError(f"unsupported physical edge: {physical_edge}")
+
+
+def _create_wrap_frame_compat(scribus, frame_name, x, y, width, height):
+	wrap_name = f"{frame_name}_wrap"
+	wrap_frame = _create_rect_compat(scribus, x, y, width, height, wrap_name)
+	_set_fill_none_compat(scribus, wrap_frame)
+	_set_line_none_compat(scribus, wrap_frame)
+	_set_text_flow_mode_compat(scribus, wrap_frame)
+	_set_text_distances_compat(scribus, wrap_frame, 0)
+	return wrap_frame
 
 
 def _create_rect_compat(scribus, x, y, width, height, name):
@@ -706,7 +823,7 @@ def _start_chapter_on_right_page_compat(scribus, current_page, layout_mode, firs
 
 
 
-def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_index, start_page, page_size, margins, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, image_border_rgb, image_border_width_pt, image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside, page_roles):
+def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_index, start_page, page_size, margins, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, image_border_rgb, image_border_width_pt, image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside, image_max_width, image_max_height, image_snap_to_edge, image_snap_target, image_allowed_edges, image_preferred_edges, image_edge_gap, layout_index, book_dir, page_roles):
 	page_width, page_height = _document_page_size_compat(scribus, page_size)
 	margin_top, margin_left, margin_right, margin_bottom = margins
 
@@ -741,12 +858,14 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 			chapter_image_cursor = _append_body_page_compat(scribus, chapter_image_cursor, "body", layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size, page_roles)
 			_goto_page_compat(scribus, chapter_image_cursor)
 
-		if layout_mode == "facing_pages" and _page_is_right_compat(layout_mode, first_page_mode, chapter_image_cursor):
-			image_spacing_left = image_spacing_inside
-			image_spacing_right = image_spacing_outside
-		else:
-			image_spacing_left = image_spacing_outside
-			image_spacing_right = image_spacing_inside
+		is_right_page = layout_mode == "facing_pages" and _page_is_right_compat(layout_mode, first_page_mode, chapter_image_cursor)
+		image_spacing_left, image_spacing_right, image_spacing_top_used, image_spacing_bottom_used = _resolve_wrap_spacing(
+			is_right_page,
+			image_spacing_inside,
+			image_spacing_outside,
+			image_spacing_top,
+			image_spacing_bottom,
+		)
 
 		if chapter_image_cursor == start_page:
 			image_body_top = chapter_opening_body_top
@@ -755,21 +874,65 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 			image_body_top = continuation_body_top
 			image_body_height = continuation_body_height
 
+		image_instruction = _resolve_image_instruction(layout_index, book_dir, image_path)
+		is_full_page = bool(image_instruction and (image_instruction.get("placement") == "full_page" or image_instruction.get("bleed") is True))
 		image_width, image_height = _image_dimensions_compat(image_path)
-		available_width = content_width - image_spacing_left - image_spacing_right
-		available_height = image_body_height - image_spacing_top - image_spacing_bottom
-		if image_width > 0 and image_height > 0:
-			frame_width = available_width
-			frame_height = frame_width * (float(image_height) / float(image_width))
-			if frame_height > available_height:
-				frame_height = available_height
-				frame_width = frame_height * (float(image_width) / float(image_height))
-		else:
-			frame_width = available_width
-			frame_height = available_height
 
-		image_x = margin_left + image_spacing_left + ((available_width - frame_width) / 2.0)
-		image_y = image_body_top + image_spacing_top + ((available_height - frame_height) / 2.0)
+		if is_full_page:
+			left_bleed, right_bleed = _page_horizontal_bleeds(layout_mode, first_page_mode, chapter_image_cursor, bleed_inside, bleed_outside)
+			trim_rect = (0.0, 0.0, page_width, page_height)
+			bleed_rect = (
+				-left_bleed,
+				-bleed_top,
+				page_width + left_bleed + right_bleed,
+				page_height + bleed_top + bleed_bottom,
+			)
+			target_rect = bleed_rect if image_instruction and image_instruction.get("bleed") else trim_rect
+			image_x, image_y, frame_width, frame_height = target_rect
+		else:
+			content_rect = (margin_left, image_body_top, content_width, image_body_height)
+			left_bleed, right_bleed = _page_horizontal_bleeds(layout_mode, first_page_mode, chapter_image_cursor, bleed_inside, bleed_outside)
+			trim_rect = (0.0, 0.0, page_width, page_height)
+			bleed_rect = (
+				-left_bleed,
+				-bleed_top,
+				page_width + left_bleed + right_bleed,
+				page_height + bleed_top + bleed_bottom,
+			)
+			snap_rect = _resolve_snap_rect(image_snap_target, content_rect, trim_rect, bleed_rect)
+
+			max_width = min(image_max_width, max(1.0, snap_rect[2]-image_edge_gap))
+			max_height = min(image_max_height, max(1.0, snap_rect[3]-image_edge_gap))
+			override_width = None
+			override_height = None
+			explicit_edge = None
+			if image_instruction:
+				override_width_mm = image_instruction.get("width_mm")
+				override_height_mm = image_instruction.get("height_mm")
+				if override_width_mm is not None:
+					override_width = _mm_to_points(override_width_mm)
+				if override_height_mm is not None:
+					override_height = _mm_to_points(override_height_mm)
+				explicit_edge = image_instruction.get("snap_edge")
+
+			if override_width is not None and override_height is not None:
+				frame_width, frame_height = _fit_contain_dimensions(image_width, image_height, override_width, override_height)
+			elif override_width is not None and image_width > 0 and image_height > 0:
+				frame_width = override_width
+				frame_height = frame_width * (float(image_height) / float(image_width))
+			elif override_height is not None and image_width > 0 and image_height > 0:
+				frame_height = override_height
+				frame_width = frame_height * (float(image_width) / float(image_height))
+			else:
+				frame_width, frame_height = _fit_contain_dimensions(image_width, image_height, max_width, max_height)
+
+			if image_snap_to_edge:
+				chosen_edge = _choose_snap_edge(explicit_edge, image_allowed_edges, image_preferred_edges)
+				physical_edge = _resolve_semantic_edge(chosen_edge, is_right_page)
+				image_x, image_y = _snap_frame_to_edge(snap_rect, frame_width, frame_height, physical_edge, image_edge_gap, is_right_page)
+			else:
+				image_x = margin_left + image_spacing_left
+				image_y = image_body_top + image_spacing_top_used
 
 		image_frame = _create_image_frame_compat(
 			scribus,
@@ -781,9 +944,18 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 		)
 		_load_image_compat(scribus, image_path, image_frame)
 		_set_scale_image_to_frame_compat(scribus, image_frame)
-		_set_text_flow_mode_compat(scribus, image_frame)
 		_apply_image_frame_style_compat(scribus, image_frame, image_border_rgb, image_border_width_pt)
-		_set_text_distances_sides_compat(scribus, image_frame, image_spacing_left, image_spacing_right, image_spacing_top, image_spacing_bottom)
+		if not is_full_page:
+			_create_wrap_frame_compat(
+				scribus,
+				f"chapter_{chapter_index}_image_{image_index}",
+				image_x - image_spacing_left,
+				image_y - image_spacing_top_used,
+				frame_width + image_spacing_left + image_spacing_right,
+				frame_height + image_spacing_top_used + image_spacing_bottom_used,
+			)
+		else:
+			_set_text_flow_mode_compat(scribus, image_frame)
 
 	_set_frame_text_compat(scribus, title_frame, title_text)
 	_set_frame_text_compat(scribus, body_frame, body_text)
@@ -854,6 +1026,15 @@ def main() -> int:
 	image_spacing_bottom = __IMAGE_SPACING_BOTTOM_POINTS__
 	image_spacing_inside = __IMAGE_SPACING_INSIDE_POINTS__
 	image_spacing_outside = __IMAGE_SPACING_OUTSIDE_POINTS__
+	image_max_width = __IMAGE_MAX_WIDTH_POINTS__
+	image_max_height = __IMAGE_MAX_HEIGHT_POINTS__
+	image_snap_to_edge = __IMAGE_SNAP_TO_EDGE__
+	image_snap_target = __IMAGE_SNAP_TARGET__
+	image_allowed_edges = __IMAGE_ALLOWED_EDGES__
+	image_preferred_edges = __IMAGE_PREFERRED_EDGES__
+	image_edge_gap = __IMAGE_EDGE_GAP_POINTS__
+	layout_plan = json.loads(__LAYOUT_PLAN_JSON__)
+	layout_index = _build_layout_index(layout_plan)
 	layout_mode = "__LAYOUT_MODE__"
 	first_page_mode = "__FIRST_PAGE_MODE__"
 	if not chapters_dir.exists():
@@ -935,6 +1116,15 @@ def main() -> int:
 				image_spacing_bottom,
 				image_spacing_inside,
 				image_spacing_outside,
+				image_max_width,
+				image_max_height,
+				image_snap_to_edge,
+				image_snap_target,
+				image_allowed_edges,
+				image_preferred_edges,
+				image_edge_gap,
+				layout_index,
+				book_dir,
 				page_roles,
 			)
 
@@ -984,7 +1174,7 @@ if __name__ == "__main__":
 	raise SystemExit(main())
 `
 
-func generateScribusScript(cfg config.Config) string {
+func generateScribusScript(cfg config.Config, plan layoutplan.Plan) string {
 	pageBackgroundRGB := "None"
 	if cfg.PageBackgroundRGB != nil {
 		pageBackgroundRGB = fmt.Sprintf("(%d, %d, %d)", cfg.PageBackgroundRGB[0], cfg.PageBackgroundRGB[1], cfg.PageBackgroundRGB[2])
@@ -1027,14 +1217,22 @@ func generateScribusScript(cfg config.Config) string {
 		"__BLEED_BOTTOM_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.BleedBottom)),
 		"__BLEED_INSIDE_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.BleedInside)),
 		"__BLEED_OUTSIDE_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.BleedOutside)),
-		"__IMAGE_BORDER_RED__", fmt.Sprintf("%d", cfg.ImageBorderRGB[0]),
-		"__IMAGE_BORDER_GREEN__", fmt.Sprintf("%d", cfg.ImageBorderRGB[1]),
-		"__IMAGE_BORDER_BLUE__", fmt.Sprintf("%d", cfg.ImageBorderRGB[2]),
-		"__IMAGE_BORDER_WIDTH_PT__", fmt.Sprintf("%.4f", cfg.ImageBorderPt),
-		"__IMAGE_SPACING_TOP_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.ImageSpaceTop)),
-		"__IMAGE_SPACING_BOTTOM_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.ImageSpaceBottom)),
-		"__IMAGE_SPACING_INSIDE_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.ImageSpaceInside)),
-		"__IMAGE_SPACING_OUTSIDE_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.ImageSpaceOutside)),
+		"__IMAGE_BORDER_RED__", fmt.Sprintf("%d", cfg.Images.Border.ColorRGB[0]),
+		"__IMAGE_BORDER_GREEN__", fmt.Sprintf("%d", cfg.Images.Border.ColorRGB[1]),
+		"__IMAGE_BORDER_BLUE__", fmt.Sprintf("%d", cfg.Images.Border.ColorRGB[2]),
+		"__IMAGE_BORDER_WIDTH_PT__", fmt.Sprintf("%.4f", cfg.Images.Border.WidthPt),
+		"__IMAGE_SPACING_TOP_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.Images.SpacingMM.Top)),
+		"__IMAGE_SPACING_BOTTOM_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.Images.SpacingMM.Bottom)),
+		"__IMAGE_SPACING_INSIDE_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.Images.SpacingMM.Inside)),
+		"__IMAGE_SPACING_OUTSIDE_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.Images.SpacingMM.Outside)),
+		"__IMAGE_MAX_WIDTH_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.Images.Sizing.MaxWidthMM)),
+		"__IMAGE_MAX_HEIGHT_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.Images.Sizing.MaxHeightMM)),
+		"__IMAGE_SNAP_TO_EDGE__", pythonBool(cfg.Images.Placement.SnapToEdge),
+		"__IMAGE_SNAP_TARGET__", fmt.Sprintf("%q", string(cfg.Images.Placement.SnapTarget)),
+		"__IMAGE_ALLOWED_EDGES__", jsonStringSliceFromImageEdges(cfg.Images.Placement.AllowedEdges),
+		"__IMAGE_PREFERRED_EDGES__", jsonStringSliceFromImageEdges(cfg.Images.Placement.Preferred),
+		"__IMAGE_EDGE_GAP_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.Images.Placement.EdgeGapMM)),
+		"__LAYOUT_PLAN_JSON__", fmt.Sprintf("%q", plan.JSON()),
 		"__PAGE_SIZE_CONSTANT__", fmt.Sprintf("PAPER_%s", strings.ToUpper(strings.ReplaceAll(cfg.PageSize, " ", "_"))),
 		"__LAYOUT_MODE__", cfg.PageLayout,
 		"__FIRST_PAGE_MODE__", cfg.FirstPage,
@@ -1066,14 +1264,30 @@ func pythonBool(v bool) string {
 	return "False"
 }
 
+func jsonStringSliceFromImageEdges(edges []config.ImageEdge) string {
+	values := make([]string, 0, len(edges))
+	for _, edge := range edges {
+		values = append(values, string(edge))
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return "[]"
+	}
+	return string(encoded)
+}
+
 func GenerateSLA(cfg config.Config, outputPath string, chapter markdown.Chapter, imagePath string) error {
 	_ = cfg
 	_ = chapter
 	_ = imagePath
-	if err := writeGeneratedScribusScript(generatedScribusScriptPath, cfg); err != nil {
+	bookDir := filepath.Dir(filepath.Dir(outputPath))
+	plan, err := layoutplan.LoadFromBookDir(bookDir)
+	if err != nil {
 		return err
 	}
-	bookDir := filepath.Dir(filepath.Dir(outputPath))
+	if err := writeGeneratedScribusScript(generatedScribusScriptPath, cfg, plan); err != nil {
+		return err
+	}
 	cmd := buildScribusInvocation(bookDir)
 	return runCommand(cmd)
 }
@@ -1089,9 +1303,9 @@ func runCommand(cmd []string) error {
 	return command.Run()
 }
 
-func writeGeneratedScribusScript(path string, cfg config.Config) error {
+func writeGeneratedScribusScript(path string, cfg config.Config, plan layoutplan.Plan) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(generateScribusScript(cfg)), 0o755)
+	return os.WriteFile(path, []byte(generateScribusScript(cfg, plan)), 0o755)
 }

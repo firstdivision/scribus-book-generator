@@ -29,12 +29,7 @@ type Config struct {
 	BleedBottom       float64
 	BleedInside       float64
 	BleedOutside      float64
-	ImageBorderRGB    [3]int
-	ImageBorderPt     float64
-	ImageSpaceTop     float64
-	ImageSpaceBottom  float64
-	ImageSpaceInside  float64
-	ImageSpaceOutside float64
+	Images            ImageDefaults
 }
 
 func Default() Config {
@@ -51,6 +46,7 @@ func Default() Config {
 		PageSize:        "A4",
 		PageOrientation: "portrait",
 		PageNumbers:     pagenumbering.DefaultSettings(),
+		Images:          DefaultImageDefaults(),
 	}
 }
 
@@ -85,18 +81,7 @@ type templateConfigFile struct {
 		Inside  float64 `yaml:"inside"`
 		Outside float64 `yaml:"outside"`
 	} `yaml:"safety_margin"`
-	Images struct {
-		Border struct {
-			ColorRGB [3]int  `yaml:"color_rgb"`
-			WidthPt  float64 `yaml:"width_pt"`
-		} `yaml:"border"`
-		SpacingMM struct {
-			Top     float64 `yaml:"top"`
-			Bottom  float64 `yaml:"bottom"`
-			Inside  float64 `yaml:"inside"`
-			Outside float64 `yaml:"outside"`
-		} `yaml:"spacing_mm"`
-	} `yaml:"images"`
+	Images      imageTemplateConfig `yaml:"images"`
 	PageNumbers *struct {
 		Enabled     *bool  `yaml:"enabled"`
 		StartOnPage *int   `yaml:"start_on_page"`
@@ -202,23 +187,9 @@ func LoadForBook(bookDir string) (Config, error) {
 	if templateFile.Bleed.Outside > 0 {
 		cfg.BleedOutside = templateFile.Bleed.Outside
 	}
-	if templateFile.Images.Border.ColorRGB != [3]int{} {
-		cfg.ImageBorderRGB = templateFile.Images.Border.ColorRGB
-	}
-	if templateFile.Images.Border.WidthPt > 0 {
-		cfg.ImageBorderPt = templateFile.Images.Border.WidthPt
-	}
-	if templateFile.Images.SpacingMM.Top > 0 {
-		cfg.ImageSpaceTop = templateFile.Images.SpacingMM.Top
-	}
-	if templateFile.Images.SpacingMM.Bottom > 0 {
-		cfg.ImageSpaceBottom = templateFile.Images.SpacingMM.Bottom
-	}
-	if templateFile.Images.SpacingMM.Inside > 0 {
-		cfg.ImageSpaceInside = templateFile.Images.SpacingMM.Inside
-	}
-	if templateFile.Images.SpacingMM.Outside > 0 {
-		cfg.ImageSpaceOutside = templateFile.Images.SpacingMM.Outside
+	cfg.Images, err = parseImageDefaults(templateFile.Images, cfg.Images)
+	if err != nil {
+		return cfg, err
 	}
 
 	return cfg, nil

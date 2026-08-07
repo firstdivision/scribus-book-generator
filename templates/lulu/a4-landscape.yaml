@@ -23,13 +23,30 @@ safety_margin:
 images:
   border:
     color_rgb: [255, 255, 255]
-    width_pt: 15
+    width_pt: 3
 
   spacing_mm:
     top: 5
     bottom: 5
     inside: 5
     outside: 5
+
+  sizing:
+    max_width_mm: 110
+    max_height_mm: 100
+
+  placement:
+    snap_to_edge: true
+    snap_target: content_area
+    allowed_edges:
+      - outside
+      - inside
+      - top
+      - bottom
+    preferred_edges:
+      - outside
+      - top
+    edge_gap_mm: 0
 
 page_numbers:
   enabled: true

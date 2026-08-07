@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"scribus-book-generator/internal/config"
+	"scribus-book-generator/internal/layout/layoutplan"
 )
 
 func TestBuildScribusInvocation(t *testing.T) {
@@ -45,7 +46,7 @@ func TestWriteGeneratedScribusScript(t *testing.T) {
 		t.Fatalf("LoadForBook returned error: %v", err)
 	}
 
-	if err := writeGeneratedScribusScript(scriptPath, cfg); err != nil {
+	if err := writeGeneratedScribusScript(scriptPath, cfg, layoutplan.Plan{}); err != nil {
 		t.Fatalf("writeGeneratedScribusScript returned error: %v", err)
 	}
 
@@ -139,6 +140,24 @@ func TestWriteGeneratedScribusScript(t *testing.T) {
 	if !strings.Contains(text, "image_spacing_top = 14.1732") {
 		t.Fatalf("generated script missing image spacing top setting")
 	}
+	if !strings.Contains(text, "image_max_width = 311.8110") {
+		t.Fatalf("generated script missing image max width setting")
+	}
+	if !strings.Contains(text, "image_snap_to_edge = True") {
+		t.Fatalf("generated script missing snap_to_edge setting")
+	}
+	if !strings.Contains(text, "layout_plan = json.loads(\"{\\\"images\\\":[]}\")") {
+		t.Fatalf("generated script missing layout plan payload")
+	}
+	if !strings.Contains(text, "def _choose_snap_edge") {
+		t.Fatalf("generated script missing edge selection helper")
+	}
+	if !strings.Contains(text, "def _fit_contain_dimensions") {
+		t.Fatalf("generated script missing contain sizing helper")
+	}
+	if !strings.Contains(text, "def _create_wrap_frame_compat") {
+		t.Fatalf("generated script missing wrap frame helper")
+	}
 	if !strings.Contains(text, "createImage") {
 		t.Fatalf("generated script missing image frame creation")
 	}
@@ -175,7 +194,7 @@ func TestWriteGeneratedScribusScriptSupportsNilPageBackground(t *testing.T) {
 	scriptPath := filepath.Join(t.TempDir(), "scripts", "scribus_generate.py")
 	cfg := config.Default()
 
-	if err := writeGeneratedScribusScript(scriptPath, cfg); err != nil {
+	if err := writeGeneratedScribusScript(scriptPath, cfg, layoutplan.Plan{}); err != nil {
 		t.Fatalf("writeGeneratedScribusScript returned error: %v", err)
 	}
 
