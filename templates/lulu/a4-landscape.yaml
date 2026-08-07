@@ -1,0 +1,31 @@
+document:
+  units: mm
+  layout: facing_pages
+  first_page: right
+
+page:
+  size: A4
+  orientation: landscape
+
+bleed:
+  top: 3.18
+  bottom: 3.18
+  inside: 3.18
+  outside: 3.18
+
+safety_margin:
+  top: 12.7
+  bottom: 12.7
+  inside: 12.7
+  outside: 12.7
+
+images:
+  border:
+    color_rgb: [255, 255, 255]
+    width_pt: 3
+
+  spacing_mm:
+    top: 5
+    bottom: 5
+    inside: 5
+    outside: 5

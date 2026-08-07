@@ -1,0 +1,7 @@
+Scribus references for this project:
+
+- Scribus Scripter API: https://impagina.org/scribus-scripter-api/
+- Scribus scripts category: https://wiki.scribus.net/canvas/Category:Scripts
+- Beginners scripts: https://wiki.scribus.net/canvas/Beginners_Scripts
+- Scripter snippets: https://wiki.scribus.net/canvas/Scripter/Snippet/Main
+- Command line scripts: https://wiki.scribus.net/canvas/Command_line_scripts

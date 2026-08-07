@@ -1,0 +1,9 @@
+Scribus workflow for this project:
+
+Run the generator inside a real Scribus-enabled environment with:
+
+scribus --python-script scripts/scribus_generate.py books/sample-book
+
+Expected outputs:
+- books/sample-book/out/example.sla
+- books/sample-book/out/example.pdf

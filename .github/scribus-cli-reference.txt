@@ -1,0 +1,557 @@
+From: https://wiki.scribus.net/canvas/Command_line_scripts
+
+Key takeaway for this project:
+- The Scribus CLI can launch a Python script directly.
+- The script can create or open a document, populate it, and export it to PDF.
+- This means we can generate the book document and render it to PDF in a single workflow.
+
+Calling syntax
+Options
+
+Various options enable to specify the behaviour
+
+    --python-script <scriptfilename.py> or -py <scriptfilename.py> : specifies the name of the script to be launched
+
+    -g : No GUI. Scribus wont display any dialogs or windows and will exit once the script is ended. This prevent dialogs to interrupt the script.
+
+    -ns : no splashscreen.
+
+Additional parameters
+
+It is possible to specify additional parameters for scripts in order to tweak their behaviour.
+
+Scripts additional arguments have to be specified directly after the --python-script option. The --python-script option and the additional parameters list have to be the last options on the command line, just before the name of the SLA document that scribus opens, when there is one. Other scribus options have to be specified first, at the beginning of the command line.
+
+All arguments placed after --python-script option will be stored in Python sys.argv variable, sys.argv[0] being the script path, sys.argv[1], ..., sys.argv[n], being the additional parameters placed after script name.
+
+Examples of possible calls, with flags and options, with or without sla document opened, with various possible option syntax :
+
+# only one short flag  + scribus doesnt open a document (the script itself does it)
+scribus -py somescript.py f
+
+# only a flag with long name + scribus opens a document the script will edit.
+scribus -py somescript.py verbose -- mydoc.sla
+
+# option with value
+scribus -py somescript.py verbose yes
+
+# more options + somescript.py works on the scribus-opened mydoc.sla
+scribus -py somescript.py v w 500 h 200 -- mydoc.sla
+
+# -- separator required here
+scribus -py somescript.py v w 500 h 200 verbose -- mydoc.sla
+
+Opened scribus document
+
+Some scripts open the document they edit. Some other scripts require a document to be opened in scribus previously. Also when using --python-script argument, scribus can open a document before launching the script.
+
+    when no scribus document is specified, it's up to the script to create or open the document(s) it wants to work with.
+
+example : a script that creates a blank square document would be called so :
+
+scribus -g -ns -py create_square_document.py side 1000
+
+    when specified, the scribus document filename has to be last on the command line
+
+example : a script that adds a coloured background would require the document to be specified on the command line
+
+scribus  -py add_colour_to_document.py   backgroundcolor red -- article.sla
+
+or
+
+scribus  -py add_colour_to_document.py   verbose backgroundcolor red -- article.sla
+
+    -- separator marks the end of the options and the beginning of the positional arguments.
+
+When a -- separator is placed in the command line, the following argument is a document's filename that scribus has to open before launching the script. -- separator is required when user specifies any python script additional argument after the script path :
+
+scribus   -py add_colour_to_document.py   backgroundcolor red   verbose  --  article.sla
+
+Accessing scripts parameters in the script
+
+'import sys' enables to access the command line arguments in sys.argv array. The script defines a 'main' function that receives argv and behaves accordingly.
+
+if __name__ == '__main__':
+    main(sys.argv)
+
+The argv array contains each option as it is on the command line. There is no preprocessing of the dash - or doubledash -- preceding a parameter. When you pass '-w' or '--width' you will get '-w' or '--width' (not 'w' or 'width').
+
+See examples below.
+Example of command line script without arguments
+Usefull 'Create PDF out of existing scribus document' script
+
+This is a basic 'export to pdf' script. You can see further below an extanded script that enables to pass arguments to specify all possible parameters of the PDF file.
+
+# Produces a PDF for the SLA passed as a parameter.
+# Uses the same file name and replaces the .sla extension with .pdf
+#
+# usage:
+# scribus -g -py to-pdf.py file.sla
+
+import os
+
+if scribus.haveDoc() :
+    filename = os.path.splitext(scribus.getDocName())[0]
+    pdf = scribus.PDFfile()
+    pdf.file = filename+".pdf"
+    pdf.save()
+else :
+    print("No file open")
+
+The script can also edit the file before saving it
+
+Here, the script writes into each of the 2 first textframes. It relies on the fact that the default name for the 2 first textframes is Text1 and Text2. Adapt to your documents and to your UI language ! For example in french the textframes would be Texte1 and Texte2.
+
+import scribus
+scribus.openDoc('mydoc.sla')
+scribus.setText('Name', 'Text1') # get 'Name' and 'Address' from database
+scribus.setText('Address', 'Text2')
+pdf = scribus.PDFfile()
+pdf.file = 'output1.pdf'
+pdf.save()
+
+Then run scribus as follow:
+
+scribus --python-script data.py
+
+and you have your output1.pdf file created!
+
+In a script below, we will see how the content to be written can be specified using some command line for the script.
+Examples of command line script with argument
+Debuging script
+
+    Basic debuging script
+
+Hello world script with arguments
+
+This 'hello_or_not.py' script says hello only when it receives "hello" as an argument. It then says goodbye.
+
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# example calls :  
+# scribus156svn -g -py hello_or_not.py 1 2  # wont say hello
+# scribus156svn -g -py hello_or_not.py hello you # will say hello
+
+import sys
+
+import sys, scribus
+
+def main(argv):
+    sayhello="idontknow"
+    i = 1;
+    # parse each arguments 
+    while i < len(argv):
+        if argv[i] == "hello":
+            sayhello="yes"
+            print "hello world"
+        i = i + 1
+    if sayhello=="idontknow":
+        print "Sorry i wasnt asked to say Hello";
+    print "good bye"
+
+if __name__ == '__main__':
+    main(sys.argv)
+
+Full 'export document to PDF with options for the PDF type'
+
+Options have to be valid PDFfile class attributes. Any of the PDFFile class attributes (as defined in scribus source code) can be used as an option :
+
+    -version <format> : receives the PDF format value. Possible values for <format> are : 13, 14, 15 etc
+    -pages <listofpage> : receives the desired list of pages. Defaults to [1] : first page.
+    -file <pdffilename> : receives the PDF output filename. Defaults to 'newfile.pdf'
+    -bleedr <rightbleedsize>
+    -info <infostring>
+    etc see full list.
+
+Example call :
+
+scribus -g -py export_to_pdf.py -version 13 -bleedr 2 -compress 1 -info 'test title' -file 'test.pdf' -- testdoc.sla
+
+Python 2.x
+
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+""" 
+
+Convert a document to a PDF
+
+Run with a command like
+	scribus -g -py export_to_pdf.py -version 13 -bleedr 2 -compress 1 -info 'test title' -file 'test.pdf' -- testdoc.sla
+
+You can set any "pdf" attribute with "-attribute value".
+
+Author: William Bader, Director of Research and Development, SCS, http://www.newspapersystems.com
+15Sep15 wb initial version
+
+"""
+
+# check that the script is running from inside scribus
+
+try:
+	from scribus import *
+    
+except ImportError:
+	print 'This script only runs from within Scribus.'
+	sys.exit(1)
+
+# get the os module
+
+try:
+	import os
+
+except ImportError:
+	print 'Could not import the os module.'
+	sys.exit(1)
+
+def main(argv):
+	pdf = scribus.PDFfile()
+	pdf.pages=[1]
+	pdf.version = 13
+	pdf.file = 'newfile.pdf'
+
+	i = 1
+	while i < len(argv):
+		if (len(argv[i]) > 0) and (argv[i][0] == '-'):
+			name = argv[i][1:]
+			try:
+				pdf_attr = getattr(pdf, name)
+				if i < len(argv):
+					i = i + 1
+					value = argv[i]
+				else:
+					value = ''
+				if callable(pdf_attr):
+					print 'Error: "', name, '" is not a settable attribute.'
+				else:
+					if isinstance(pdf_attr, float):
+						try:
+							setattr(pdf, name, float(value))
+						except:
+							print 'Error: Could not set "', name, '", "', value, '" is not a valid real number.'
+					elif isinstance(pdf_attr, int):
+						# Integers and booleans
+						try:
+							if value.lower() in [ 'true', 't', 'yes', 'y', 'si', 's', 'oui', 'o' ]:
+								setattr(pdf, name, 1)
+							elif value.lower() in [ 'false', 'f', 'no', 'n' ]:
+								setattr(pdf, name, 0)
+							else:
+								setattr(pdf, name, int(value))
+						except:
+							print 'Error: Could not set "', name, '", "', value, '" is not a valid integer.'
+					elif isinstance(pdf_attr, basestring):
+						# Should this differentiate str and unicode, or will the assignment do the conversion?
+						try:
+							setattr(pdf, name, value)
+						except:
+							print 'Error: Could not set "', name, '", "', value, '" is not a valid string.'
+					else:
+						print 'Error: Could not set "', name, ', type "', type(pdf_attr), '" not supported.'
+					print name, ' is ', str(getattr(pdf, name)), '.'
+			except:
+				print 'Error: Ignoring unrecognized pdf attribute "', name, '".'
+		i = i + 1
+
+	pdf.save()
+
+# start the script
+
+if __name__ == '__main__':
+	if haveDoc():
+		main(sys.argv)
+	else:
+		print 'Error: You need to have a document open before you can run this script successfully.'
+
+Python 3.x
+
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+""" 
+
+Convert a document to a PDF
+
+Run with a command like
+	scribus -g -py export_to_pdf.py -version 13 -bleedr 2 -compress 1 -info 'test title' -file 'test.pdf' -- testdoc.sla
+
+You can set any "pdf" attribute with "-attribute value".
+
+Author: William Bader, Director of Research and Development, SCS, http://www.newspapersystems.com
+15Sep15 wb initial version
+
+Updated for Python 3 by Roan Horning, InnoVision Medical, http://www.innovisionmedical.com
+See https://impagina.org/scribus-scripter-api/pdf-export/ for PDF Export options (last viewed 2025-08-19)
+
+"""
+
+# check that the script is running from inside scribus
+
+try:
+	from scribus import *
+    
+except ImportError:
+	print('This script only runs from within Scribus.')
+	sys.exit(1)
+
+# get the os module
+
+try:
+	import os
+
+except ImportError:
+	print('Could not import the os module.')
+	sys.exit(1)
+
+def main(argv):
+	pdf = scribus.PDFfile()
+	pdf.pages=[1]
+	pdf.version = 13
+	pdf.file = 'newfile.pdf'
+
+	i = 1
+	while i < len(argv):
+		if (len(argv[i]) > 0) and (argv[i][0] == '-'):
+			name = argv[i][1:]
+			try:
+				pdf_attr = getattr(pdf, name)
+				if i < len(argv):
+					i = i + 1
+					value = argv[i]
+				else:
+					value = ''
+				if callable(pdf_attr):
+					print('Error: "', name, '" is not a settable attribute.')
+				else:
+					if isinstance(pdf_attr, float):
+						try:
+							setattr(pdf, name, float(value))
+						except:
+							print('Error: Could not set "', name, '", "', value, '" is not a valid real number.')
+					elif isinstance(pdf_attr, int):
+						# Integers and booleans
+						try:
+							if value.lower() in [ 'true', 't', 'yes', 'y', 'si', 's', 'oui', 'o' ]:
+								setattr(pdf, name, 1)
+							elif value.lower() in [ 'false', 'f', 'no', 'n' ]:
+								setattr(pdf, name, 0)
+							else:
+								setattr(pdf, name, int(value))
+						except:
+							print('Error: Could not set "', name, '", "', value, '" is not a valid integer.')
+					elif isinstance(pdf_attr, str):
+						try:
+							setattr(pdf, name, value)
+						except:
+							print('Error: Could not set "', name, '", "', value, '" is not a valid string.')
+					else:
+						print('Error: Could not set "', name, ', type "', type(pdf_attr), '" not supported.')
+					print(name, ' is ', str(getattr(pdf, name)), '.')
+			except:
+				print('Error: Ignoring unrecognized pdf attribute "', name, '".')
+		i = i + 1
+
+	pdf.save()
+
+# start the script
+
+if __name__ == '__main__':
+	if haveDoc():
+		main(sys.argv)
+	else:
+		print('Error: You need to have a document open before you can run this script successfully.')
+
+Edit document and create PDF, using the command line to state the text to be inserted
+
+This to-pdf-with-placeholder.py script reads the command lines options, looks for the value of the 'text' option and inserts the found text in the document. It then creates the PDF.
+
+It uses getopt to parse the options. There are 3 possible options :
+
+    The 'text' option can either be '-t' or '--text' and requires a value.
+    -h for help. Its a flag : no value expected.
+    -o or --output to specify the name of the PDF output file. It requires a value.
+
+Note it runs getopt() on a subset of the received arguments to get rid of the first argument (automatically added internally by Scribus): sys.argv[2:]
+
+# Open the SLA file passed to Scribus, replace the content of the text frame named "placeholder" with
+# the value in the -t argument and produce a PDF file named as defined by the -o argument.
+#
+# usage:
+# - create a SLA file with a text frame named "placeholder"
+# - run scribus -g -py to-pdf-with-placeholder.py -o file.pdf -t "welcome to scribus" -- file.sla
+#
+# (c) MIT Ale Rimoldi
+
+import sys
+import getopt
+import scribus
+
+# print(sys.argv)
+
+text_usage = "scribus -g -py " + sys.argv[0] + " -o <outputfile.pdf> -t <text place holder> -- <inputfile.sla>"
+pdf_file = ''
+text_placeholder = ''
+
+try:
+  opts, args = getopt.getopt(sys.argv[2:],"ho:t:",["output=", "text="])
+except getopt.GetoptError:
+  print(text_usage)
+  sys.exit(2)
+
+for opt, arg in opts:
+  if opt == "-h":
+     print(text_usage)
+     sys.exit()
+  elif opt in ("-o", "--output"):
+     pdf_file = arg
+  elif opt in ("-t", "--text"):
+     text_placeholder = arg
+
+if (pdf_file == "" or text_placeholder == "") :
+     print(text_usage)
+     sys.exit()
+
+if scribus.haveDoc() :
+    scribus.setText(text_placeholder, "placeholder")
+    pdf = scribus.PDFfile()
+    pdf.file = pdf_file
+    pdf.save()
+else :
+    print("No file open")
+
+Script to print the required height for a text to be imported into a textframe
+
+That 'storydeptharg.py' script receives a text filename as a command line argument, opens it, puts its content in the first text frame of the Scribus document and adapts height of the text frame to fit the text. It then prints the required height and exits. It has to be launched with an opened scribus document.
+
+    create storydeptharg.py script (with following code)
+    have a sample.txt ready with some text inside
+    create somedocument.sla scribus file having at least a 'Text1' textframe on one of its page (this is the default name for the first created textframe in english UI scribus : It will be Texte1 for french UI. So adapt to your UI langage or rename the textframe using the Property Palette )
+
+Launch script with arguments :
+
+scribus -g -py storydeptharg.py -storyfile sample.txt -- somedocument.sla
+
+'storydeptharg.py' script :
+
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+""" 
+storydeptharg.py : Imports into text1 textframe the content of -storyfile option textfile and adapts height of the text frame to fit the text.
+Return the computed depth of the text frame
+
+Run with the command line
+	scribus -g -py storydeptharg.py -storyfile sample.txt -- depthtemplate.sla
+
+- sample.txt is the text file to measure.
+- depthtemplate.sla is a document with a single, empty text frame.
+
+Tested with scribus 1.5.0
+
+Author: William Bader
+
+11Aug14 wb initial version
+15Dec14 wb get the file name from STORYFILE
+19Aug15 wb get the file name from the command line
+13Sep15 change comment to fit merged version syntax for arguments
+
+"""
+
+# check that the script is running from inside scribus
+
+try:
+	from scribus import *
+    
+except ImportError:
+	print 'This script only runs from within Scribus.'
+	sys.exit(1)
+
+# get the os module
+
+try:
+	import os
+
+except ImportError:
+	print 'Could not import the os module.'
+	sys.exit(1)
+
+# get the sys module
+
+try:
+	import sys
+
+except ImportError:
+	print 'Could not import the sys module.'
+	sys.exit(1)
+
+def main(argv):
+
+	# The first text frame of the current document defines the style
+
+	try:
+		storyfile = ""
+
+		i = 1;
+		while i < len(argv):
+			if argv[i] == "-storyfile":
+				storyfile = argv[i+1]
+			i = i + 1
+
+		if storyfile == "":
+			print 'Warning: -storyfile not given, checking environment'
+			storyfile = os.environ['STORYFILE']
+
+	except:
+		print 'Error: Pass the story file with the -storyfile argument or the STORYFILE environment variable'
+		return
+
+	try:
+		storytext = open(storyfile, 'r').read()
+	except:
+		print 'Error: Story file "', storyfile, '" not found.'
+		return
+
+	try:
+		deselectAll()
+		selectObject('Text1')
+	except:
+		print 'Error: The document does not have an object called Text1.'
+		return
+
+	try:
+		setText(storytext)
+	except:
+		print 'Error: The document does not have a text frame.'
+		return
+
+	try:
+		ov = textOverflows()
+		width, depth = getSize()
+		if ov:
+			baddepth = depth
+			gooddepth = 100
+		else:
+			baddepth = 0
+			gooddepth = depth
+		while baddepth < gooddepth:
+			trydepth = (baddepth + gooddepth) / 2
+			sizeObject(width, trydepth)
+			tryov = textOverflows()
+			if tryov:
+				baddepth = trydepth + 0.0001
+			else:
+				baddepth = baddepth + 0.0001
+				gooddepth = trydepth
+		sizeObject(width, gooddepth)
+
+		print 'The depth is ', str(gooddepth)
+	except:
+		print 'Error: not a text frame.'
+
+# start the script
+
+if __name__ == '__main__':
+	if haveDoc():
+		main(sys.argv)
+	else:
+		print 'Error: You need to have a document open before you can run this script succesfully.'
