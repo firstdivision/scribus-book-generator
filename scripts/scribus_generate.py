@@ -388,9 +388,230 @@ def _create_page_background_compat(scribus, page_number, layout_mode, first_page
 			pass
 
 
-def _append_body_page_compat(scribus, current_page, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size):
+def _logical_page_number_compat(physical_page, start_on_page, start_number):
+	if physical_page < start_on_page:
+		return None
+	return start_number + (physical_page - start_on_page)
+
+
+def _roman_numeral_compat(number):
+	values = (
+		(1000, "M"),
+		(900, "CM"),
+		(500, "D"),
+		(400, "CD"),
+		(100, "C"),
+		(90, "XC"),
+		(50, "L"),
+		(40, "XL"),
+		(10, "X"),
+		(9, "IX"),
+		(5, "V"),
+		(4, "IV"),
+		(1, "I"),
+	)
+	parts = []
+	remaining = number
+	for value, symbol in values:
+		while remaining >= value:
+			parts.append(symbol)
+			remaining -= value
+	return "".join(parts)
+
+
+def _format_page_number_compat(number_format, number):
+	if number_format == "arabic":
+		return str(number)
+	roman = _roman_numeral_compat(number)
+	if number_format == "roman_lower":
+		return roman.lower()
+	return roman
+
+
+def _page_number_placement_compat(position, is_right_page):
+	if position == "bottom_outside":
+		if is_right_page:
+			return "bottom", "right", "right", "outside"
+		return "bottom", "left", "left", "outside"
+	if position == "bottom_inside":
+		if is_right_page:
+			return "bottom", "left", "left", "inside"
+		return "bottom", "right", "right", "inside"
+	if position == "bottom_center":
+		return "bottom", "center", "center", "center"
+	if position == "top_outside":
+		if is_right_page:
+			return "top", "right", "right", "outside"
+		return "top", "left", "left", "outside"
+	if position == "top_inside":
+		if is_right_page:
+			return "top", "left", "left", "inside"
+		return "top", "right", "right", "inside"
+	return "top", "center", "center", "center"
+
+
+def _set_text_color_compat(scribus, frame_name, color_name):
+	if not hasattr(scribus, "setTextColor"):
+		return
+	try:
+		scribus.setTextColor(color_name, frame_name)
+		return
+	except TypeError:
+		pass
+	try:
+		scribus.setTextColor(frame_name, color_name)
+	except TypeError:
+		return
+
+
+def _set_font_compat(scribus, frame_name, font_name, fallback_font_name):
+	if not hasattr(scribus, "setFont"):
+		return
+	for candidate in (font_name, fallback_font_name):
+		if not candidate:
+			continue
+		try:
+			scribus.setFont(candidate, frame_name)
+			return
+		except Exception:
+			continue
+
+
+def _set_font_size_compat(scribus, frame_name, font_size_pt):
+	if not hasattr(scribus, "setFontSize"):
+		return
+	try:
+		scribus.setFontSize(font_size_pt, frame_name)
+		return
+	except TypeError:
+		pass
+	try:
+		scribus.setFontSize(frame_name, font_size_pt)
+	except TypeError:
+		return
+
+
+def _set_fill_none_compat(scribus, frame_name):
+	if not hasattr(scribus, "setFillColor"):
+		return
+	try:
+		scribus.setFillColor("None", frame_name)
+	except Exception:
+		return
+
+
+def _set_line_none_compat(scribus, frame_name):
+	if hasattr(scribus, "setLineColor"):
+		try:
+			scribus.setLineColor("None", frame_name)
+		except Exception:
+			pass
+	if hasattr(scribus, "setLineWidth"):
+		try:
+			scribus.setLineWidth(0, frame_name)
+		except Exception:
+			return
+
+
+def _set_text_alignment_compat(scribus, frame_name, alignment_name):
+	if not hasattr(scribus, "setTextAlignment"):
+		return
+	alignment_map = {
+		"left": getattr(scribus, "ALIGN_LEFT", 0),
+		"right": getattr(scribus, "ALIGN_RIGHT", 2),
+		"center": getattr(scribus, "ALIGN_CENTERED", 1),
+	}
+	alignment = alignment_map.get(alignment_name, alignment_map["left"])
+	try:
+		scribus.setTextAlignment(alignment, frame_name)
+		return
+	except TypeError:
+		pass
+	try:
+		scribus.setTextAlignment(frame_name, alignment)
+	except TypeError:
+		return
+
+
+def _render_page_number_frame_compat(scribus, page_number, page_role, page_size, layout_mode, first_page_mode, page_number_start_on_page, page_number_start_number, page_number_format, page_number_position, page_number_font_name, page_number_font_family, page_number_font_size_pt, page_number_color_rgb, page_number_offset_top, page_number_offset_bottom, page_number_offset_inside, page_number_offset_outside, page_number_hide_on):
+	if page_role in page_number_hide_on:
+		return
+
+	logical_number = _logical_page_number_compat(page_number, page_number_start_on_page, page_number_start_number)
+	if logical_number is None:
+		return
+
+	page_width, page_height = _document_page_size_compat(scribus, page_size)
+	vertical, horizontal, alignment_name, offset_key = _page_number_placement_compat(
+		page_number_position,
+		_page_is_right_compat(layout_mode, first_page_mode, page_number),
+	)
+	frame_width = max(page_number_font_size_pt * 8.0, 72.0)
+	frame_height = max(page_number_font_size_pt * 2.0, 18.0)
+
+	if offset_key == "inside":
+		horizontal_offset = page_number_offset_inside
+	elif offset_key == "outside":
+		horizontal_offset = page_number_offset_outside
+	else:
+		horizontal_offset = 0.0
+
+	if horizontal == "left":
+		x = horizontal_offset
+	elif horizontal == "right":
+		x = page_width - horizontal_offset - frame_width
+	else:
+		x = (page_width - frame_width) / 2.0
+
+	if vertical == "top":
+		y = page_number_offset_top
+	else:
+		y = page_height - page_number_offset_bottom - frame_height
+
+	frame_name = f"page_{page_number}_number"
+	frame = _create_text_frame_compat(scribus, x, y, frame_width, frame_height, frame_name)
+	_set_frame_text_compat(scribus, frame, _format_page_number_compat(page_number_format, logical_number))
+	_set_font_compat(scribus, frame, page_number_font_name, page_number_font_family)
+	_set_font_size_compat(scribus, frame, page_number_font_size_pt)
+	_set_text_alignment_compat(scribus, frame, alignment_name)
+	_set_fill_none_compat(scribus, frame)
+	_set_line_none_compat(scribus, frame)
+	_set_text_color_compat(scribus, frame, _ensure_rgb_color_compat(scribus, page_number_color_rgb))
+
+
+def _render_page_numbers_compat(scribus, total_pages, page_roles, page_size, layout_mode, first_page_mode, page_numbers_enabled, page_number_start_on_page, page_number_start_number, page_number_format, page_number_position, page_number_font_name, page_number_font_family, page_number_font_size_pt, page_number_color_rgb, page_number_offset_top, page_number_offset_bottom, page_number_offset_inside, page_number_offset_outside, page_number_hide_on):
+	if not page_numbers_enabled:
+		return
+
+	for page_number in range(1, total_pages + 1):
+		_goto_page_compat(scribus, page_number)
+		_render_page_number_frame_compat(
+			scribus,
+			page_number,
+			page_roles.get(page_number, "body"),
+			page_size,
+			layout_mode,
+			first_page_mode,
+			page_number_start_on_page,
+			page_number_start_number,
+			page_number_format,
+			page_number_position,
+			page_number_font_name,
+			page_number_font_family,
+			page_number_font_size_pt,
+			page_number_color_rgb,
+			page_number_offset_top,
+			page_number_offset_bottom,
+			page_number_offset_inside,
+			page_number_offset_outside,
+			page_number_hide_on,
+		)
+
+
+def _append_body_page_compat(scribus, current_page, page_role, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size, page_roles):
 	_append_page_compat(scribus)
 	current_page += 1
+	page_roles[current_page] = page_role
 	_create_page_background_compat(scribus, current_page, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size)
 	return current_page
 
@@ -460,16 +681,16 @@ def _text_overflows_compat(scribus, frame_name):
 		return False
 
 
-def _start_chapter_on_right_page_compat(scribus, current_page, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size):
+def _start_chapter_on_right_page_compat(scribus, current_page, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size, page_roles):
 	if current_page % 2 == 1:
-		current_page = _append_body_page_compat(scribus, current_page, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size)
+		current_page = _append_body_page_compat(scribus, current_page, "blank", layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size, page_roles)
 
-	current_page = _append_body_page_compat(scribus, current_page, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size)
+	current_page = _append_body_page_compat(scribus, current_page, "chapter_opening", layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size, page_roles)
 	return current_page
 
 
 
-def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_index, start_page, page_size, margins, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, image_border_rgb, image_border_width_pt, image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside):
+def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_index, start_page, page_size, margins, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, image_border_rgb, image_border_width_pt, image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside, page_roles):
 	page_width, page_height = _document_page_size_compat(scribus, page_size)
 	margin_top, margin_left, margin_right, margin_bottom = margins
 
@@ -501,7 +722,7 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 
 	for image_index, image_path in enumerate(image_paths, start=1):
 		if image_index > 1:
-			chapter_image_cursor = _append_body_page_compat(scribus, chapter_image_cursor, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size)
+			chapter_image_cursor = _append_body_page_compat(scribus, chapter_image_cursor, "body", layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size, page_roles)
 			_goto_page_compat(scribus, chapter_image_cursor)
 
 		if layout_mode == "facing_pages" and _page_is_right_compat(layout_mode, first_page_mode, chapter_image_cursor):
@@ -556,7 +777,7 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 	# If Scribus reports overflow, grow the chain incrementally.
 	max_extra_pages = 20
 	while _text_overflows_compat(scribus, body_frames[-1]) and max_extra_pages > 0:
-		current_page = _append_body_page_compat(scribus, current_page, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size)
+		current_page = _append_body_page_compat(scribus, current_page, "body", layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size, page_roles)
 		_goto_page_compat(scribus, current_page)
 		next_page_number = len(body_frames) + 1
 		next_frame = _create_text_frame_compat(
@@ -592,7 +813,21 @@ def main() -> int:
 		36.0000,
 	)
 	page_size_constant = "PAPER_A4"
-	page_background_rgb = (200, 200, 200)
+	page_background_rgb = (248, 244, 232)
+	page_numbers_enabled = True
+	page_number_start_on_page = 1
+	page_number_start_number = 1
+	page_number_format = "arabic"
+	page_number_position = "bottom_outside"
+	page_number_font_name = "Source Serif 4 Regular"
+	page_number_font_family = "Source Serif 4"
+	page_number_font_size_pt = 9.0000
+	page_number_color_rgb = (80, 80, 80)
+	page_number_offset_top = 19.8425
+	page_number_offset_bottom = 19.8425
+	page_number_offset_inside = 28.3465
+	page_number_offset_outside = 28.3465
+	page_number_hide_on = ["chapter_opening","full_page_image","blank"]
 	bleed_top = 9.0142
 	bleed_bottom = 9.0142
 	bleed_inside = 9.0142
@@ -655,10 +890,11 @@ def main() -> int:
 			scribus.setDocTitle(title)
 
 		current_page = 1
+		page_roles = {1: "chapter_opening"}
 		for index, chapter_data in enumerate(chapters, start=1):
 			chapter_title, chapter_body, chapter_images = chapter_data
 			if index > 1:
-				current_page = _start_chapter_on_right_page_compat(scribus, current_page, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size)
+				current_page = _start_chapter_on_right_page_compat(scribus, current_page, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size, page_roles)
 				_goto_page_compat(scribus, current_page)
 
 			current_page = _render_basic_content(
@@ -683,7 +919,31 @@ def main() -> int:
 				image_spacing_bottom,
 				image_spacing_inside,
 				image_spacing_outside,
+				page_roles,
 			)
+
+		_render_page_numbers_compat(
+			scribus,
+			current_page,
+			page_roles,
+			page_size,
+			layout_mode,
+			first_page_mode,
+			page_numbers_enabled,
+			page_number_start_on_page,
+			page_number_start_number,
+			page_number_format,
+			page_number_position,
+			page_number_font_name,
+			page_number_font_family,
+			page_number_font_size_pt,
+			page_number_color_rgb,
+			page_number_offset_top,
+			page_number_offset_bottom,
+			page_number_offset_inside,
+			page_number_offset_outside,
+			page_number_hide_on,
+		)
 
 		_goto_page_compat(scribus, 1)
 		_save_document_compat(scribus, sla_path)

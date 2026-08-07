@@ -70,7 +70,16 @@ func TestWriteGeneratedScribusScript(t *testing.T) {
 	if !strings.Contains(text, "def _apply_master_page_compat") {
 		t.Fatalf("generated script missing master page application helper")
 	}
-	if !strings.Contains(text, "current_page = _start_chapter_on_right_page_compat(scribus, current_page, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size)") {
+	if !strings.Contains(text, "def _render_page_numbers_compat") {
+		t.Fatalf("generated script missing page number rendering helper")
+	}
+	if !strings.Contains(text, "def _logical_page_number_compat") {
+		t.Fatalf("generated script missing logical page number helper")
+	}
+	if !strings.Contains(text, "def _page_number_placement_compat") {
+		t.Fatalf("generated script missing page number placement helper")
+	}
+	if !strings.Contains(text, "current_page = _start_chapter_on_right_page_compat(scribus, current_page, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size, page_roles)") {
 		t.Fatalf("generated script missing chapter right-page call")
 	}
 	if !strings.Contains(text, "scribus.newDocument(paper_size, margins, orientation, first_page_number, unit_points, page_type, first_page_order, num_pages)") {
@@ -103,8 +112,20 @@ func TestWriteGeneratedScribusScript(t *testing.T) {
 	if !strings.Contains(text, "image_border_rgb = (255, 255, 255)") {
 		t.Fatalf("generated script missing image border rgb settings")
 	}
-	if !strings.Contains(text, "page_background_rgb = (200, 200, 200)") {
+	if !strings.Contains(text, "page_background_rgb = (248, 244, 232)") {
 		t.Fatalf("generated script missing page background rgb settings")
+	}
+	if !strings.Contains(text, "page_numbers_enabled = True") {
+		t.Fatalf("generated script missing page number enabled setting")
+	}
+	if !strings.Contains(text, "page_number_position = \"bottom_outside\"") {
+		t.Fatalf("generated script missing page number position setting")
+	}
+	if !strings.Contains(text, "page_number_font_name = \"Source Serif 4 Regular\"") {
+		t.Fatalf("generated script missing page number font setting")
+	}
+	if !strings.Contains(text, "page_number_hide_on = [\"chapter_opening\",\"full_page_image\",\"blank\"]") {
+		t.Fatalf("generated script missing page number hide_on setting")
 	}
 	if !strings.Contains(text, "scribus.createMasterPage(master_page_name)") {
 		t.Fatalf("generated script missing master page creation")
@@ -166,5 +187,8 @@ func TestWriteGeneratedScribusScriptSupportsNilPageBackground(t *testing.T) {
 	text := string(content)
 	if !strings.Contains(text, "page_background_rgb = None") {
 		t.Fatalf("generated script missing nil page background setting")
+	}
+	if !strings.Contains(text, "page_numbers_enabled = False") {
+		t.Fatalf("generated script missing disabled page number setting")
 	}
 }

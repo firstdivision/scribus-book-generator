@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"scribus-book-generator/internal/layout/pagenumbering"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,6 +24,7 @@ type Config struct {
 	PageSize          string
 	PageOrientation   string
 	PageBackgroundRGB *[3]int
+	PageNumbers       pagenumbering.Settings
 	BleedTop          float64
 	BleedBottom       float64
 	BleedInside       float64
@@ -47,6 +50,7 @@ func Default() Config {
 		DocumentUnits:   "mm",
 		PageSize:        "A4",
 		PageOrientation: "portrait",
+		PageNumbers:     pagenumbering.DefaultSettings(),
 	}
 }
 
@@ -93,6 +97,26 @@ type templateConfigFile struct {
 			Outside float64 `yaml:"outside"`
 		} `yaml:"spacing_mm"`
 	} `yaml:"images"`
+	PageNumbers *struct {
+		Enabled     *bool  `yaml:"enabled"`
+		StartOnPage *int   `yaml:"start_on_page"`
+		StartNumber *int   `yaml:"start_number"`
+		Format      string `yaml:"format"`
+		Position    string `yaml:"position"`
+		Font        struct {
+			Family string   `yaml:"family"`
+			Style  string   `yaml:"style"`
+			SizePt *float64 `yaml:"size_pt"`
+		} `yaml:"font"`
+		ColorRGB []int `yaml:"color_rgb"`
+		OffsetMM struct {
+			Top     *float64 `yaml:"top"`
+			Bottom  *float64 `yaml:"bottom"`
+			Inside  *float64 `yaml:"inside"`
+			Outside *float64 `yaml:"outside"`
+		} `yaml:"offset_mm"`
+		HideOn []string `yaml:"hide_on"`
+	} `yaml:"page_numbers"`
 }
 
 func LoadForBook(bookDir string) (Config, error) {
@@ -140,6 +164,11 @@ func LoadForBook(bookDir string) (Config, error) {
 	if templateFile.Page.BackgroundColorRGB != nil {
 		cfg.PageBackgroundRGB = templateFile.Page.BackgroundColorRGB
 	}
+	pageNumbers, err := parsePageNumberSettings(templateFile.PageNumbers)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.PageNumbers = pageNumbers
 
 	if templateFile.Page.WidthMM > 0 && templateFile.Page.HeightMM > 0 {
 		cfg.PageWidth = templateFile.Page.WidthMM
@@ -193,6 +222,87 @@ func LoadForBook(bookDir string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func parsePageNumberSettings(raw *struct {
+	Enabled     *bool  `yaml:"enabled"`
+	StartOnPage *int   `yaml:"start_on_page"`
+	StartNumber *int   `yaml:"start_number"`
+	Format      string `yaml:"format"`
+	Position    string `yaml:"position"`
+	Font        struct {
+		Family string   `yaml:"family"`
+		Style  string   `yaml:"style"`
+		SizePt *float64 `yaml:"size_pt"`
+	} `yaml:"font"`
+	ColorRGB []int `yaml:"color_rgb"`
+	OffsetMM struct {
+		Top     *float64 `yaml:"top"`
+		Bottom  *float64 `yaml:"bottom"`
+		Inside  *float64 `yaml:"inside"`
+		Outside *float64 `yaml:"outside"`
+	} `yaml:"offset_mm"`
+	HideOn []string `yaml:"hide_on"`
+}) (pagenumbering.Settings, error) {
+	settings := pagenumbering.DefaultSettings()
+	if raw == nil {
+		return settings, nil
+	}
+
+	if raw.Enabled != nil {
+		settings.Enabled = *raw.Enabled
+	}
+	if raw.StartOnPage != nil {
+		settings.StartOnPage = *raw.StartOnPage
+	}
+	if raw.StartNumber != nil {
+		settings.StartNumber = *raw.StartNumber
+	}
+	if trimmed := strings.TrimSpace(raw.Format); trimmed != "" {
+		settings.Format = pagenumbering.NumberFormat(trimmed)
+	}
+	if trimmed := strings.TrimSpace(raw.Position); trimmed != "" {
+		settings.Position = pagenumbering.Position(trimmed)
+	}
+	if trimmed := strings.TrimSpace(raw.Font.Family); trimmed != "" {
+		settings.Font.Family = trimmed
+	}
+	if trimmed := strings.TrimSpace(raw.Font.Style); trimmed != "" {
+		settings.Font.Style = trimmed
+	}
+	if raw.Font.SizePt != nil {
+		settings.Font.SizePt = *raw.Font.SizePt
+	}
+	if raw.ColorRGB != nil {
+		if len(raw.ColorRGB) != 3 {
+			return settings, fmt.Errorf("page_numbers.color_rgb must contain exactly 3 integers")
+		}
+		settings.ColorRGB = [3]int{raw.ColorRGB[0], raw.ColorRGB[1], raw.ColorRGB[2]}
+	}
+	if raw.OffsetMM.Top != nil {
+		settings.OffsetMM.Top = *raw.OffsetMM.Top
+	}
+	if raw.OffsetMM.Bottom != nil {
+		settings.OffsetMM.Bottom = *raw.OffsetMM.Bottom
+	}
+	if raw.OffsetMM.Inside != nil {
+		settings.OffsetMM.Inside = *raw.OffsetMM.Inside
+	}
+	if raw.OffsetMM.Outside != nil {
+		settings.OffsetMM.Outside = *raw.OffsetMM.Outside
+	}
+	if raw.HideOn != nil {
+		settings.HideOn = make([]pagenumbering.PageRole, 0, len(raw.HideOn))
+		for _, role := range raw.HideOn {
+			settings.HideOn = append(settings.HideOn, pagenumbering.PageRole(strings.TrimSpace(role)))
+		}
+	}
+
+	if err := settings.Validate(); err != nil {
+		return settings, err
+	}
+
+	return settings, nil
 }
 
 func firstNonEmpty(values ...string) string {

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"scribus-book-generator/internal/layout/pagenumbering"
 )
 
 func TestLoadForBookFromTemplate(t *testing.T) {
@@ -38,8 +40,32 @@ func TestLoadForBookFromTemplate(t *testing.T) {
 	if cfg.PageBackgroundRGB == nil {
 		t.Fatalf("expected page background color to be loaded")
 	}
-	if *cfg.PageBackgroundRGB != [3]int{200, 200, 200} {
-		t.Fatalf("expected page background rgb [200 200 200], got %v", *cfg.PageBackgroundRGB)
+	if *cfg.PageBackgroundRGB != [3]int{248, 244, 232} {
+		t.Fatalf("expected page background rgb [248 244 232], got %v", *cfg.PageBackgroundRGB)
+	}
+	if !cfg.PageNumbers.Enabled {
+		t.Fatalf("expected page numbers to be enabled")
+	}
+	if cfg.PageNumbers.StartOnPage != 1 || cfg.PageNumbers.StartNumber != 1 {
+		t.Fatalf("expected page numbers to start at page 1/number 1, got page=%d number=%d", cfg.PageNumbers.StartOnPage, cfg.PageNumbers.StartNumber)
+	}
+	if cfg.PageNumbers.Format != pagenumbering.FormatArabic {
+		t.Fatalf("expected arabic page number format, got %q", cfg.PageNumbers.Format)
+	}
+	if cfg.PageNumbers.Position != pagenumbering.PositionBottomOutside {
+		t.Fatalf("expected bottom_outside page number position, got %q", cfg.PageNumbers.Position)
+	}
+	if cfg.PageNumbers.Font.Family != "Source Serif 4" || cfg.PageNumbers.Font.Style != "Regular" || cfg.PageNumbers.Font.SizePt != 9 {
+		t.Fatalf("unexpected page number font settings: %+v", cfg.PageNumbers.Font)
+	}
+	if cfg.PageNumbers.ColorRGB != [3]int{80, 80, 80} {
+		t.Fatalf("expected page number color [80 80 80], got %v", cfg.PageNumbers.ColorRGB)
+	}
+	if cfg.PageNumbers.OffsetMM.Top != 7 || cfg.PageNumbers.OffsetMM.Bottom != 7 || cfg.PageNumbers.OffsetMM.Inside != 10 || cfg.PageNumbers.OffsetMM.Outside != 10 {
+		t.Fatalf("unexpected page number offsets: %+v", cfg.PageNumbers.OffsetMM)
+	}
+	if len(cfg.PageNumbers.HideOn) != 3 {
+		t.Fatalf("expected 3 page-number hidden roles, got %d", len(cfg.PageNumbers.HideOn))
 	}
 	if cfg.MarginTop != 12.7 || cfg.MarginBottom != 12.7 || cfg.MarginLeft != 12.7 || cfg.MarginRight != 12.7 {
 		t.Fatalf("expected 12.7mm safety margins, got top=%.2f left=%.2f right=%.2f bottom=%.2f", cfg.MarginTop, cfg.MarginLeft, cfg.MarginRight, cfg.MarginBottom)
@@ -80,7 +106,31 @@ func TestLoadForBookDefaultsWhenBookConfigMissing(t *testing.T) {
 	}
 
 	defaults := Default()
-	if cfg != defaults {
+	if cfg.PageWidth != defaults.PageWidth || cfg.PageHeight != defaults.PageHeight || cfg.PageLayout != defaults.PageLayout || cfg.FirstPage != defaults.FirstPage || cfg.DocumentUnits != defaults.DocumentUnits || cfg.PageSize != defaults.PageSize || cfg.PageOrientation != defaults.PageOrientation {
 		t.Fatalf("expected defaults %+v, got %+v", defaults, cfg)
+	}
+	if cfg.PageNumbers.Enabled != defaults.PageNumbers.Enabled || cfg.PageNumbers.StartOnPage != defaults.PageNumbers.StartOnPage || cfg.PageNumbers.StartNumber != defaults.PageNumbers.StartNumber || cfg.PageNumbers.Format != defaults.PageNumbers.Format || cfg.PageNumbers.Position != defaults.PageNumbers.Position {
+		t.Fatalf("expected page number defaults %+v, got %+v", defaults.PageNumbers, cfg.PageNumbers)
+	}
+}
+
+func TestLoadForBookRejectsInvalidPageNumberConfig(t *testing.T) {
+	bookDir := t.TempDir()
+	templateDir := filepath.Join(bookDir, "templates", "lulu")
+	if err := os.MkdirAll(templateDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(bookDir, "book.yaml"), []byte("template: a4-landscape.yaml\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile book.yaml returned error: %v", err)
+	}
+
+	template := []byte("document:\n  units: mm\npage:\n  size: A4\n  orientation: landscape\npage_numbers:\n  enabled: true\n  start_on_page: 0\n")
+	if err := os.WriteFile(filepath.Join(templateDir, "a4-landscape.yaml"), template, 0o644); err != nil {
+		t.Fatalf("WriteFile template returned error: %v", err)
+	}
+
+	if _, err := LoadForBook(bookDir); err == nil {
+		t.Fatalf("expected invalid page number config to return an error")
 	}
 }

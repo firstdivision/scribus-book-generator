@@ -30,3 +30,28 @@ images:
     bottom: 5
     inside: 5
     outside: 5
+
+page_numbers:
+  enabled: true
+  start_on_page: 1
+  start_number: 1
+  format: arabic
+  position: bottom_outside
+
+  font:
+    family: Source Serif 4
+    style: Regular
+    size_pt: 9
+
+  color_rgb: [80, 80, 80]
+
+  offset_mm:
+    top: 7
+    bottom: 7
+    inside: 10
+    outside: 10
+
+  hide_on:
+    - chapter_opening
+    - full_page_image
+    - blank
