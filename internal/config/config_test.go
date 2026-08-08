@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"scribus-book-generator/internal/layout/pagenumbering"
@@ -63,6 +64,15 @@ func TestLoadForBookFromTemplate(t *testing.T) {
 	}
 	if cfg.PageNumbers.OffsetMM.Top != 7 || cfg.PageNumbers.OffsetMM.Bottom != 7 || cfg.PageNumbers.OffsetMM.Inside != 10 || cfg.PageNumbers.OffsetMM.Outside != 10 {
 		t.Fatalf("unexpected page number offsets: %+v", cfg.PageNumbers.OffsetMM)
+	}
+	if cfg.ChapterHeadings.Font.Family != "Source Serif 4" || cfg.ChapterHeadings.Font.Style != "Semibold" || cfg.ChapterHeadings.Font.SizePt != 28 {
+		t.Fatalf("unexpected chapter heading font: %+v", cfg.ChapterHeadings.Font)
+	}
+	if cfg.ChapterHeadings.ColorRGB != [3]int{40, 40, 40} || cfg.ChapterHeadings.Alignment != "left" {
+		t.Fatalf("unexpected chapter heading style: %+v", cfg.ChapterHeadings)
+	}
+	if cfg.ChapterHeadings.SpacingMM.Top != 20 || cfg.ChapterHeadings.SpacingMM.Bottom != 10 {
+		t.Fatalf("unexpected chapter heading spacing: %+v", cfg.ChapterHeadings.SpacingMM)
 	}
 	if len(cfg.PageNumbers.HideOn) != 3 {
 		t.Fatalf("expected 3 page-number hidden roles, got %d", len(cfg.PageNumbers.HideOn))
@@ -162,5 +172,45 @@ func TestLoadForBookRejectsInvalidImageConfig(t *testing.T) {
 
 	if _, err := LoadForBook(bookDir); err == nil {
 		t.Fatalf("expected invalid image config to return an error")
+	}
+}
+
+func TestLoadForBookRejectsInvalidChapterHeadingConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  string
+		wantErr string
+	}{
+		{name: "empty family", config: "font:\n  family: ''\n", wantErr: "font.family"},
+		{name: "empty style", config: "font:\n  style: ' '\n", wantErr: "font.style"},
+		{name: "zero size", config: "font:\n  size_pt: 0\n", wantErr: "font.size_pt"},
+		{name: "short color", config: "color_rgb: [40, 40]\n", wantErr: "exactly 3"},
+		{name: "color out of range", config: "color_rgb: [40, 40, 256]\n", wantErr: "between 0 and 255"},
+		{name: "bad alignment", config: "alignment: justify\n", wantErr: "alignment"},
+		{name: "negative top spacing", config: "spacing_mm:\n  top: -1\n", wantErr: "spacing_mm.top"},
+		{name: "negative bottom spacing", config: "spacing_mm:\n  bottom: -1\n", wantErr: "spacing_mm.bottom"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			bookDir := t.TempDir()
+			templateDir := filepath.Join(bookDir, "templates", "lulu")
+			if err := os.MkdirAll(templateDir, 0o755); err != nil {
+				t.Fatalf("MkdirAll returned error: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(bookDir, "book.yaml"), []byte("template: test.yaml\n"), 0o644); err != nil {
+				t.Fatalf("WriteFile book.yaml returned error: %v", err)
+			}
+			indentedConfig := "  " + strings.ReplaceAll(test.config, "\n", "\n  ")
+			template := "document:\n  units: mm\nchapter_headings:\n" + indentedConfig
+			if err := os.WriteFile(filepath.Join(templateDir, "test.yaml"), []byte(template), 0o644); err != nil {
+				t.Fatalf("WriteFile template returned error: %v", err)
+			}
+
+			_, err := LoadForBook(bookDir)
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("expected error containing %q, got %v", test.wantErr, err)
+			}
+		})
 	}
 }

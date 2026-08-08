@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"scribus-book-generator/internal/layout/chapterheadings"
 	"scribus-book-generator/internal/layout/pagenumbering"
 
 	"gopkg.in/yaml.v3"
@@ -29,6 +30,7 @@ type Config struct {
 	BleedBottom       float64
 	BleedInside       float64
 	BleedOutside      float64
+	ChapterHeadings   chapterheadings.Settings
 	Images            ImageDefaults
 }
 
@@ -46,12 +48,27 @@ func Default() Config {
 		PageSize:        "A4",
 		PageOrientation: "portrait",
 		PageNumbers:     pagenumbering.DefaultSettings(),
+		ChapterHeadings: chapterheadings.DefaultSettings(),
 		Images:          DefaultImageDefaults(),
 	}
 }
 
 type bookConfigFile struct {
 	Template string `yaml:"template"`
+}
+
+type chapterHeadingTemplateConfig struct {
+	Font struct {
+		Family *string  `yaml:"family"`
+		Style  *string  `yaml:"style"`
+		SizePt *float64 `yaml:"size_pt"`
+	} `yaml:"font"`
+	ColorRGB  []int   `yaml:"color_rgb"`
+	Alignment *string `yaml:"alignment"`
+	SpacingMM struct {
+		Top    *float64 `yaml:"top"`
+		Bottom *float64 `yaml:"bottom"`
+	} `yaml:"spacing_mm"`
 }
 
 type templateConfigFile struct {
@@ -81,8 +98,9 @@ type templateConfigFile struct {
 		Inside  float64 `yaml:"inside"`
 		Outside float64 `yaml:"outside"`
 	} `yaml:"safety_margin"`
-	Images      imageTemplateConfig `yaml:"images"`
-	PageNumbers *struct {
+	ChapterHeadings *chapterHeadingTemplateConfig `yaml:"chapter_headings"`
+	Images          imageTemplateConfig           `yaml:"images"`
+	PageNumbers     *struct {
 		Enabled     *bool  `yaml:"enabled"`
 		StartOnPage *int   `yaml:"start_on_page"`
 		StartNumber *int   `yaml:"start_number"`
@@ -154,6 +172,10 @@ func LoadForBook(bookDir string) (Config, error) {
 		return cfg, err
 	}
 	cfg.PageNumbers = pageNumbers
+	cfg.ChapterHeadings, err = parseChapterHeadingSettings(templateFile.ChapterHeadings, cfg.ChapterHeadings)
+	if err != nil {
+		return cfg, err
+	}
 
 	if templateFile.Page.WidthMM > 0 && templateFile.Page.HeightMM > 0 {
 		cfg.PageWidth = templateFile.Page.WidthMM
@@ -193,6 +215,43 @@ func LoadForBook(bookDir string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func parseChapterHeadingSettings(raw *chapterHeadingTemplateConfig, defaults chapterheadings.Settings) (chapterheadings.Settings, error) {
+	settings := defaults
+	if raw == nil {
+		return settings, nil
+	}
+
+	if raw.Font.Family != nil {
+		settings.Font.Family = strings.TrimSpace(*raw.Font.Family)
+	}
+	if raw.Font.Style != nil {
+		settings.Font.Style = strings.TrimSpace(*raw.Font.Style)
+	}
+	if raw.Font.SizePt != nil {
+		settings.Font.SizePt = *raw.Font.SizePt
+	}
+	if raw.ColorRGB != nil {
+		if len(raw.ColorRGB) != 3 {
+			return settings, fmt.Errorf("chapter_headings.color_rgb must contain exactly 3 integers")
+		}
+		settings.ColorRGB = [3]int{raw.ColorRGB[0], raw.ColorRGB[1], raw.ColorRGB[2]}
+	}
+	if raw.Alignment != nil {
+		settings.Alignment = chapterheadings.Alignment(strings.TrimSpace(*raw.Alignment))
+	}
+	if raw.SpacingMM.Top != nil {
+		settings.SpacingMM.Top = *raw.SpacingMM.Top
+	}
+	if raw.SpacingMM.Bottom != nil {
+		settings.SpacingMM.Bottom = *raw.SpacingMM.Bottom
+	}
+
+	if err := settings.Validate(); err != nil {
+		return settings, err
+	}
+	return settings, nil
 }
 
 func parsePageNumberSettings(raw *struct {

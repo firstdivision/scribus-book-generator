@@ -20,6 +20,19 @@ safety_margin:
   inside: 12.7
   outside: 12.7
 
+chapter_headings:
+  font:
+    family: URW Bookman
+    style: Demi
+    size_pt: 28
+
+  color_rgb: [40, 40, 40]
+  alignment: left
+
+  spacing_mm:
+    top: 20
+    bottom: 10
+
 images:
   border:
     color_rgb: [255, 255, 255]

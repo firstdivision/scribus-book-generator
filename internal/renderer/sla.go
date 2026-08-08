@@ -127,14 +127,21 @@ def _image_dimensions_compat(image_path: Path):
 
 def _parse_chapter_markdown(chapter_path: Path):
 	title = "Untitled Chapter"
+	title_found = False
 	paragraphs = []
 
-	for raw_line in chapter_path.read_text(encoding="utf-8").splitlines():
+	for line_number, raw_line in enumerate(chapter_path.read_text(encoding="utf-8").splitlines(), start=1):
 		line = raw_line.strip()
 		if not line:
 			continue
-		if title == "Untitled Chapter" and line.startswith("# "):
-			title = line[2:].strip() or title
+		if line.startswith("# "):
+			if title_found:
+				raise RuntimeError(f"{chapter_path}: additional H1 heading on line {line_number}; only the first H1 may be a chapter title")
+			parsed_title = line[2:].strip()
+			if not parsed_title:
+				raise RuntimeError(f"{chapter_path}: chapter title on line {line_number} must be non-empty")
+			title = parsed_title
+			title_found = True
 			continue
 		paragraphs.append(line)
 
@@ -418,6 +425,20 @@ def _ensure_rgb_color_compat(scribus, rgb_values):
 		except Exception:
 			pass
 
+	return color_name
+
+
+def _ensure_chapter_heading_color_compat(scribus, rgb_values):
+	color_name = f"chapter_heading_{rgb_values[0]}_{rgb_values[1]}_{rgb_values[2]}"
+	if hasattr(scribus, "getColorNames"):
+		try:
+			if color_name in scribus.getColorNames():
+				return color_name
+		except Exception:
+			pass
+	if not hasattr(scribus, "defineColorRGB"):
+		raise RuntimeError("Scribus color creation API is unavailable")
+	scribus.defineColorRGB(color_name, rgb_values[0], rgb_values[1], rgb_values[2])
 	return color_name
 
 
@@ -715,6 +736,88 @@ def _set_text_alignment_compat(scribus, frame_name, alignment_name):
 		return
 
 
+def _require_font_compat(scribus, font_name):
+	if not hasattr(scribus, "getFontNames"):
+		return
+	try:
+		available_fonts = scribus.getFontNames()
+	except Exception as exc:
+		raise RuntimeError(f"Unable to inspect Scribus fonts while validating '{font_name}'") from exc
+	if font_name not in available_fonts:
+		raise RuntimeError(f"Configured chapter heading font '{font_name}' is not available in Scribus")
+
+
+def _chapter_heading_style_name(alignment_name):
+	return f"Chapter Heading {alignment_name.title()}"
+
+
+def _ensure_chapter_heading_styles_compat(scribus, font_name, font_size_pt, color_rgb):
+	_require_font_compat(scribus, font_name)
+	color_name = _ensure_chapter_heading_color_compat(scribus, color_rgb)
+	character_style_name = "Chapter Heading Characters"
+	if not hasattr(scribus, "createCharStyle") or not hasattr(scribus, "createParagraphStyle"):
+		raise RuntimeError("Scribus paragraph/character style creation API is unavailable")
+
+	existing_character_styles = []
+	if hasattr(scribus, "getCharStyles"):
+		existing_character_styles = scribus.getCharStyles()
+	if character_style_name not in existing_character_styles:
+		try:
+			scribus.createCharStyle(
+				name=character_style_name,
+				font=font_name,
+				fontsize=font_size_pt,
+				fillcolor=color_name,
+			)
+		except TypeError:
+			scribus.createCharStyle(character_style_name, font_name, font_size_pt, "", color_name)
+
+	existing_paragraph_styles = []
+	if hasattr(scribus, "getParagraphStyles"):
+		existing_paragraph_styles = scribus.getParagraphStyles()
+	for alignment_name in ("left", "center", "right"):
+		style_name = _chapter_heading_style_name(alignment_name)
+		if style_name in existing_paragraph_styles:
+			continue
+		alignment_map = {
+			"left": getattr(scribus, "ALIGN_LEFT", 0),
+			"center": getattr(scribus, "ALIGN_CENTERED", 1),
+			"right": getattr(scribus, "ALIGN_RIGHT", 2),
+		}
+		try:
+			scribus.createParagraphStyle(
+				name=style_name,
+				alignment=alignment_map[alignment_name],
+				charstyle=character_style_name,
+			)
+		except TypeError:
+			scribus.createParagraphStyle(style_name, 0, 15, alignment_map[alignment_name], 0, 0, 0, 0, 0, 0, 2, 0, character_style_name)
+
+
+def _set_paragraph_style_compat(scribus, frame_name, style_name):
+	if not hasattr(scribus, "setParagraphStyle"):
+		raise RuntimeError("Scribus paragraph style application API is unavailable")
+	try:
+		scribus.setParagraphStyle(style_name, frame_name)
+		return
+	except TypeError:
+		pass
+	try:
+		scribus.setParagraphStyle(frame_name, style_name)
+	except Exception as exc:
+		raise RuntimeError(f"Unable to apply Scribus paragraph style '{style_name}'") from exc
+
+
+def _resolve_chapter_heading_alignment(alignment_name, is_right_page):
+	if alignment_name in ("left", "center", "right"):
+		return alignment_name
+	if alignment_name == "inside":
+		return "left" if is_right_page else "right"
+	if alignment_name == "outside":
+		return "right" if is_right_page else "left"
+	raise RuntimeError(f"unsupported chapter heading alignment: {alignment_name}")
+
+
 def _render_page_number_frame_compat(scribus, page_number, page_role, page_size, layout_mode, first_page_mode, page_number_start_on_page, page_number_start_number, page_number_format, page_number_position, page_number_font_name, page_number_font_family, page_number_font_size_pt, page_number_color_rgb, page_number_offset_top, page_number_offset_bottom, page_number_offset_inside, page_number_offset_outside, page_number_hide_on):
 	if page_role in page_number_hide_on:
 		return
@@ -872,13 +975,14 @@ def _start_chapter_on_right_page_compat(scribus, current_page, layout_mode, firs
 
 
 
-def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_index, start_page, page_size, margins, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, image_border_rgb, image_border_width_pt, image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside, image_max_width, image_max_height, image_snap_to_edge, image_snap_target, image_allowed_edges, image_preferred_edges, image_edge_gap, layout_index, book_dir, page_roles):
+def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_index, start_page, page_size, margins, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, chapter_heading_font_size_pt, chapter_heading_alignment, chapter_heading_spacing_top, chapter_heading_spacing_bottom, image_border_rgb, image_border_width_pt, image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside, image_max_width, image_max_height, image_snap_to_edge, image_snap_target, image_allowed_edges, image_preferred_edges, image_edge_gap, layout_index, book_dir, page_roles):
 	page_width, page_height = _document_page_size_compat(scribus, page_size)
 	margin_top, margin_left, margin_right, margin_bottom = margins
 
 	content_width = page_width - margin_left - margin_right
-	title_height = 64.0
-	chapter_opening_body_top = margin_top + title_height + 12.0
+	title_height = max(chapter_heading_font_size_pt * 1.5, chapter_heading_font_size_pt + 4.0)
+	title_top = margin_top + chapter_heading_spacing_top
+	chapter_opening_body_top = title_top + title_height + chapter_heading_spacing_bottom
 	chapter_opening_body_height = page_height - chapter_opening_body_top - margin_bottom
 	continuation_body_top = margin_top
 	continuation_body_height = page_height - continuation_body_top - margin_bottom
@@ -887,7 +991,7 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 	title_frame = _create_text_frame_compat(
 		scribus,
 		margin_left,
-		margin_top,
+		title_top,
 		content_width,
 		title_height,
 		f"chapter_{chapter_index}_title",
@@ -1055,6 +1159,11 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 			_set_text_flow_mode_compat(scribus, image_frame)
 
 	_set_frame_text_compat(scribus, title_frame, title_text)
+	physical_heading_alignment = _resolve_chapter_heading_alignment(
+		chapter_heading_alignment,
+		_page_is_right_compat(layout_mode, first_page_mode, start_page),
+	)
+	_set_paragraph_style_compat(scribus, title_frame, _chapter_heading_style_name(physical_heading_alignment))
 	_set_frame_text_compat(scribus, body_frame, body_text)
 
 	current_page = chapter_image_cursor
@@ -1115,6 +1224,12 @@ def main() -> int:
 	page_number_offset_inside = __PAGE_NUMBER_OFFSET_INSIDE_POINTS__
 	page_number_offset_outside = __PAGE_NUMBER_OFFSET_OUTSIDE_POINTS__
 	page_number_hide_on = __PAGE_NUMBER_HIDE_ON__
+	chapter_heading_font_name = __CHAPTER_HEADING_FONT_NAME__
+	chapter_heading_font_size_pt = __CHAPTER_HEADING_FONT_SIZE_PT__
+	chapter_heading_color_rgb = (__CHAPTER_HEADING_COLOR_RED__, __CHAPTER_HEADING_COLOR_GREEN__, __CHAPTER_HEADING_COLOR_BLUE__)
+	chapter_heading_alignment = __CHAPTER_HEADING_ALIGNMENT__
+	chapter_heading_spacing_top = __CHAPTER_HEADING_SPACING_TOP_POINTS__
+	chapter_heading_spacing_bottom = __CHAPTER_HEADING_SPACING_BOTTOM_POINTS__
 	bleed_top = __BLEED_TOP_POINTS__
 	bleed_bottom = __BLEED_BOTTOM_POINTS__
 	bleed_inside = __BLEED_INSIDE_POINTS__
@@ -1179,6 +1294,7 @@ def main() -> int:
 			first_page_mode,
 			page_size_constant,
 		)
+		_ensure_chapter_heading_styles_compat(scribus, chapter_heading_font_name, chapter_heading_font_size_pt, chapter_heading_color_rgb)
 		_create_page_background_compat(scribus, 1, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size)
 		title = chapters[0][0] or book_dir.name
 		if hasattr(scribus, "setDocTitle"):
@@ -1208,6 +1324,10 @@ def main() -> int:
 				bleed_outside,
 				bleed_top,
 				bleed_bottom,
+				chapter_heading_font_size_pt,
+				chapter_heading_alignment,
+				chapter_heading_spacing_top,
+				chapter_heading_spacing_bottom,
 				image_border_rgb,
 				image_border_width_pt,
 				image_spacing_top,
@@ -1286,6 +1406,7 @@ func generateScribusScript(cfg config.Config, plan layoutplan.Plan) string {
 		pageNumberHideOnJSON = []byte("[]")
 	}
 	pageNumberFontName := scribusFontName(cfg.PageNumbers.Font.Family, cfg.PageNumbers.Font.Style)
+	chapterHeadingFontName := scribusFontName(cfg.ChapterHeadings.Font.Family, cfg.ChapterHeadings.Font.Style)
 
 	replacer := strings.NewReplacer(
 		"__PAGE_WIDTH_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.PageWidth)),
@@ -1311,6 +1432,14 @@ func generateScribusScript(cfg config.Config, plan layoutplan.Plan) string {
 		"__PAGE_NUMBER_OFFSET_INSIDE_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.PageNumbers.OffsetMM.Inside)),
 		"__PAGE_NUMBER_OFFSET_OUTSIDE_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.PageNumbers.OffsetMM.Outside)),
 		"__PAGE_NUMBER_HIDE_ON__", string(pageNumberHideOnJSON),
+		"__CHAPTER_HEADING_FONT_NAME__", fmt.Sprintf("%q", chapterHeadingFontName),
+		"__CHAPTER_HEADING_FONT_SIZE_PT__", fmt.Sprintf("%.4f", cfg.ChapterHeadings.Font.SizePt),
+		"__CHAPTER_HEADING_COLOR_RED__", fmt.Sprintf("%d", cfg.ChapterHeadings.ColorRGB[0]),
+		"__CHAPTER_HEADING_COLOR_GREEN__", fmt.Sprintf("%d", cfg.ChapterHeadings.ColorRGB[1]),
+		"__CHAPTER_HEADING_COLOR_BLUE__", fmt.Sprintf("%d", cfg.ChapterHeadings.ColorRGB[2]),
+		"__CHAPTER_HEADING_ALIGNMENT__", fmt.Sprintf("%q", string(cfg.ChapterHeadings.Alignment)),
+		"__CHAPTER_HEADING_SPACING_TOP_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.ChapterHeadings.SpacingMM.Top)),
+		"__CHAPTER_HEADING_SPACING_BOTTOM_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.ChapterHeadings.SpacingMM.Bottom)),
 		"__BLEED_TOP_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.BleedTop)),
 		"__BLEED_BOTTOM_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.BleedBottom)),
 		"__BLEED_INSIDE_POINTS__", fmt.Sprintf("%.4f", mmToPoints(cfg.BleedInside)),

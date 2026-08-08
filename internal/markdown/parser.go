@@ -1,6 +1,7 @@
 package markdown
 
 import (
+	"fmt"
 	"os"
 	"strings"
 )
@@ -20,18 +21,22 @@ func ParseFile(path string) (Chapter, error) {
 	var title string
 	var paragraphs []string
 
-	for _, line := range lines {
+	for lineNumber, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
 		}
-		if title == "" && strings.HasPrefix(trimmed, "# ") {
+		if strings.HasPrefix(trimmed, "# ") {
+			if title != "" {
+				return Chapter{}, fmt.Errorf("additional H1 heading on line %d; only the first H1 may be a chapter title", lineNumber+1)
+			}
 			title = strings.TrimSpace(strings.TrimPrefix(trimmed, "# "))
+			if title == "" {
+				return Chapter{}, fmt.Errorf("chapter title on line %d must be non-empty", lineNumber+1)
+			}
 			continue
 		}
-		if title != "" {
-			paragraphs = append(paragraphs, trimmed)
-		}
+		paragraphs = append(paragraphs, trimmed)
 	}
 
 	if title == "" {

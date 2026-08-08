@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -127,7 +128,8 @@ func TestWriteGeneratedScribusScript(t *testing.T) {
 	if !strings.Contains(text, "image_border_rgb = (255, 255, 255)") {
 		t.Fatalf("generated script missing image border rgb settings")
 	}
-	if !strings.Contains(text, "page_background_rgb = (248, 244, 232)") {
+	expectedPageBackground := fmt.Sprintf("page_background_rgb = (%d, %d, %d)", cfg.PageBackgroundRGB[0], cfg.PageBackgroundRGB[1], cfg.PageBackgroundRGB[2])
+	if !strings.Contains(text, expectedPageBackground) {
 		t.Fatalf("generated script missing page background rgb settings")
 	}
 	if !strings.Contains(text, "page_numbers_enabled = True") {
@@ -141,6 +143,38 @@ func TestWriteGeneratedScribusScript(t *testing.T) {
 	}
 	if !strings.Contains(text, "page_number_hide_on = [\"chapter_opening\",\"full_page_image\",\"blank\"]") {
 		t.Fatalf("generated script missing page number hide_on setting")
+	}
+	if !strings.Contains(text, "chapter_heading_font_name = \"Source Serif 4 Semibold\"") {
+		t.Fatalf("generated script missing exact chapter heading font")
+	}
+	if !strings.Contains(text, "chapter_heading_font_size_pt = 28.0000") {
+		t.Fatalf("generated script missing chapter heading font size")
+	}
+	if !strings.Contains(text, "chapter_heading_color_rgb = (40, 40, 40)") {
+		t.Fatalf("generated script missing chapter heading color")
+	}
+	if !strings.Contains(text, "chapter_heading_alignment = \"left\"") {
+		t.Fatalf("generated script missing chapter heading alignment")
+	}
+	if !strings.Contains(text, "def _ensure_chapter_heading_styles_compat") || !strings.Contains(text, "Chapter Heading Characters") {
+		t.Fatalf("generated script missing reusable chapter heading styles")
+	}
+	if !strings.Contains(text, "Configured chapter heading font '{font_name}' is not available in Scribus") {
+		t.Fatalf("generated script missing exact font availability error")
+	}
+	if !strings.Contains(text, "def _resolve_chapter_heading_alignment") {
+		t.Fatalf("generated script missing semantic heading alignment resolution")
+	}
+	expectedHeadingTop := fmt.Sprintf("chapter_heading_spacing_top = %.4f", mmToPoints(cfg.ChapterHeadings.SpacingMM.Top))
+	if !strings.Contains(text, expectedHeadingTop) {
+		t.Fatalf("generated script missing chapter heading top spacing")
+	}
+	expectedHeadingBottom := fmt.Sprintf("chapter_heading_spacing_bottom = %.4f", mmToPoints(cfg.ChapterHeadings.SpacingMM.Bottom))
+	if !strings.Contains(text, expectedHeadingBottom) {
+		t.Fatalf("generated script missing chapter heading bottom spacing")
+	}
+	if !strings.Contains(text, "title_top = margin_top + chapter_heading_spacing_top") || !strings.Contains(text, "chapter_opening_body_top = title_top + title_height + chapter_heading_spacing_bottom") {
+		t.Fatalf("generated script should apply chapter heading spacing through frame geometry")
 	}
 	if !strings.Contains(text, "if is_full_page:\n\t\t\tpage_roles[chapter_image_cursor] = \"full_page_image\"") {
 		t.Fatalf("generated script should classify full-page image pages for page number suppression")
@@ -268,6 +302,53 @@ print("\n".join(results))`, scriptPath, chapterDir)
 	}
 	if !strings.Contains(text, "img_5678.jpg") {
 		t.Fatalf("expected generated helper to discover lowercase image, got output %q", text)
+	}
+}
+
+func TestGeneratedScribusScriptParsesChapterHeading(t *testing.T) {
+	scriptPath := filepath.Join(t.TempDir(), "scripts", "scribus_generate.py")
+	if err := writeGeneratedScribusScript(scriptPath, config.Default(), layoutplan.Plan{}); err != nil {
+		t.Fatalf("writeGeneratedScribusScript returned error: %v", err)
+	}
+
+	chapterPath := filepath.Join(t.TempDir(), "chapter.md")
+	content := "# The Road to San Rosario\n\nFirst body paragraph.\n\nSecond body paragraph.\n"
+	if err := os.WriteFile(chapterPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write chapter: %v", err)
+	}
+
+	cmd := exec.Command("python3", "-c", `import importlib.util, json, pathlib, sys
+spec = importlib.util.spec_from_file_location("scribus_generate", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+print(json.dumps(module._parse_chapter_markdown(pathlib.Path(sys.argv[2]))))`, scriptPath, chapterPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to execute generated Markdown parser: %v\n%s", err, output)
+	}
+
+	var parsed []string
+	if err := json.Unmarshal(output, &parsed); err != nil {
+		t.Fatalf("decode parser output %q: %v", output, err)
+	}
+	if len(parsed) != 2 || parsed[0] != "The Road to San Rosario" {
+		t.Fatalf("unexpected parsed chapter: %#v", parsed)
+	}
+	if parsed[1] != "First body paragraph.\n\nSecond body paragraph." {
+		t.Fatalf("unexpected parsed body: %q", parsed[1])
+	}
+
+	if err := os.WriteFile(chapterPath, []byte("# First\n\nBody.\n\n# Second\n"), 0o644); err != nil {
+		t.Fatalf("failed to rewrite chapter: %v", err)
+	}
+	cmd = exec.Command("python3", "-c", `import importlib.util, pathlib, sys
+spec = importlib.util.spec_from_file_location("scribus_generate", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+module._parse_chapter_markdown(pathlib.Path(sys.argv[2]))`, scriptPath, chapterPath)
+	output, err = cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "additional H1 heading on line 5") {
+		t.Fatalf("expected useful additional-H1 error, got err=%v output=%q", err, output)
 	}
 }
 
