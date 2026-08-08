@@ -18,6 +18,7 @@ const (
 )
 
 type Plan struct {
+	Title  string             `json:"title,omitempty"`
 	Images []ImageInstruction `json:"images"`
 }
 
@@ -29,6 +30,12 @@ type ImageInstruction struct {
 	SnapEdge  string    `json:"snap_edge,omitempty"`
 	WidthMM   *float64  `json:"width_mm,omitempty"`
 	HeightMM  *float64  `json:"height_mm,omitempty"`
+	Border    *Border   `json:"border,omitempty"`
+}
+
+type Border struct {
+	ColorRGB []int    `json:"color_rgb,omitempty"`
+	WidthPt  *float64 `json:"width_pt,omitempty"`
 }
 
 type InlineOverride struct {
@@ -70,6 +77,21 @@ func (p Plan) Validate() error {
 		}
 		if image.HeightMM != nil && *image.HeightMM <= 0 {
 			return fmt.Errorf("layout.images[%d].height_mm must be > 0", i)
+		}
+		if image.Border != nil {
+			if image.Border.WidthPt != nil && *image.Border.WidthPt < 0 {
+				return fmt.Errorf("layout.images[%d].border.width_pt must be >= 0", i)
+			}
+			if image.Border.ColorRGB != nil {
+				if len(image.Border.ColorRGB) != 3 {
+					return fmt.Errorf("layout.images[%d].border.color_rgb must contain exactly 3 integers", i)
+				}
+				for _, component := range image.Border.ColorRGB {
+					if component < 0 || component > 255 {
+						return fmt.Errorf("layout.images[%d].border.color_rgb values must be between 0 and 255", i)
+					}
+				}
+			}
 		}
 		if image.Placement != "" && image.Placement != PlacementInline && image.Placement != PlacementFullPage {
 			return fmt.Errorf("layout.images[%d].placement must be one of inline, full_page", i)

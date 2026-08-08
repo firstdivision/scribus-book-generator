@@ -1,4 +1,5 @@
 {
+    "title": "The Roast to San Rosario",
     "images": [
         {
             "file": "chapters/1-the-road-to-san-rosario/the-road.png",
@@ -19,7 +20,10 @@
         {
             "file": "chapters/2-the-people-who-stayed/sunset-gathering-at-hotel-rosario.png",
             "placement": "full_page",
-            "bleed": true
+            "bleed": true,
+            "border": {
+                "width_pt": 0
+            }
         }
     ]
 }

@@ -222,7 +222,11 @@ For facing pages:
 
 Text wrap spacing remains separate from edge snap.
 
-### `layout.json` image overrides
+### `layout.json`
+
+The optional top-level `title` names the generated `.sla` and `.pdf` files. If it is empty or omitted, the book directory name is used.
+
+#### Image overrides
 
 Book-level defaults come from template YAML, but individual images in `layout.json` can override:
 

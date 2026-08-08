@@ -242,6 +242,13 @@ def _build_layout_index(layout_plan):
 	return index
 
 
+def _output_filename_stem(layout_plan, book_dir):
+	title = str(layout_plan.get("title") or "").strip()
+	stem = title or book_dir.name
+	stem = stem.replace("/", "-").replace("\\", "-").strip()
+	return stem or book_dir.name
+
+
 def _resolve_image_instruction(layout_index, book_dir, image_path):
 	image_resolved = image_path.resolve()
 	candidates = [_normalize_path_key(image_resolved)]
@@ -314,18 +321,18 @@ def _choose_snap_edge(explicit_edge, allowed_edges, preferred_edges):
 	raise RuntimeError("images.placement.allowed_edges must not be empty")
 
 
-def _snap_frame_to_edge(snap_rect, frame_width, frame_height, physical_edge, edge_gap, is_right_page):
+def _snap_frame_to_edge(snap_rect, frame_width, frame_height, physical_edge, edge_gap, is_right_page, spacing_left, spacing_right, spacing_top, spacing_bottom):
 	left, top, rect_width, rect_height = snap_rect
 	if physical_edge == "left":
-		return left + edge_gap, top + edge_gap
+		return left + edge_gap + spacing_left, top + spacing_top
 	if physical_edge == "right":
-		return left + rect_width - frame_width - edge_gap, top + edge_gap
+		return left + rect_width - frame_width - edge_gap - spacing_right, top + spacing_top
 	if physical_edge == "top":
-		x = left + rect_width - frame_width if is_right_page else left
-		return x, top + edge_gap
+		x = left + rect_width - frame_width - spacing_right if is_right_page else left + spacing_left
+		return x, top + edge_gap + spacing_top
 	if physical_edge == "bottom":
-		x = left + rect_width - frame_width if is_right_page else left
-		return x, top + rect_height - frame_height - edge_gap
+		x = left + rect_width - frame_width - spacing_right if is_right_page else left + spacing_left
+		return x, top + rect_height - frame_height - edge_gap - spacing_bottom
 	raise RuntimeError(f"unsupported physical edge: {physical_edge}")
 
 
@@ -399,6 +406,34 @@ def _apply_image_frame_style_compat(scribus, frame_name, border_rgb, border_widt
 			scribus.setLineWidth(border_width_pt, frame_name)
 		except Exception:
 			pass
+
+
+def _resolve_border_override(image_instruction, default_border_rgb, default_border_width_pt):
+	border_rgb = default_border_rgb
+	border_width_pt = default_border_width_pt
+
+	if not image_instruction:
+		return border_rgb, border_width_pt
+
+	border_override = image_instruction.get("border")
+	if not isinstance(border_override, dict):
+		return border_rgb, border_width_pt
+
+	color_rgb = border_override.get("color_rgb")
+	if isinstance(color_rgb, list) and len(color_rgb) == 3:
+		try:
+			border_rgb = (int(color_rgb[0]), int(color_rgb[1]), int(color_rgb[2]))
+		except Exception:
+			pass
+
+	width_pt = border_override.get("width_pt")
+	if width_pt is not None:
+		try:
+			border_width_pt = float(width_pt)
+		except Exception:
+			pass
+
+	return border_rgb, border_width_pt
 
 
 def _page_is_right_compat(layout_mode, first_page_mode, page_number):
@@ -840,6 +875,16 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 		if image_index > 1:
 			chapter_image_cursor = _append_body_page_compat(scribus, chapter_image_cursor, "body", layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size, page_roles)
 			_goto_page_compat(scribus, chapter_image_cursor)
+			continuation_frame = _create_text_frame_compat(
+				scribus,
+				margin_left,
+				continuation_body_top,
+				content_width,
+				continuation_body_height,
+				f"chapter_{chapter_index}_body_image_{image_index}",
+			)
+			_link_text_frames_compat(scribus, body_frames[-1], continuation_frame)
+			body_frames.append(continuation_frame)
 
 		is_right_page = layout_mode == "facing_pages" and _page_is_right_compat(layout_mode, first_page_mode, chapter_image_cursor)
 		image_spacing_left, image_spacing_right, image_spacing_top_used, image_spacing_bottom_used = _resolve_wrap_spacing(
@@ -858,10 +903,16 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 			image_body_height = continuation_body_height
 
 		image_instruction = _resolve_image_instruction(layout_index, book_dir, image_path)
+		image_border_rgb_used, image_border_width_pt_used = _resolve_border_override(
+			image_instruction,
+			image_border_rgb,
+			image_border_width_pt,
+		)
 		is_full_page = bool(image_instruction and (image_instruction.get("placement") == "full_page" or image_instruction.get("bleed") is True))
 		image_width, image_height = _image_dimensions_compat(image_path)
 
 		if is_full_page:
+			page_roles[chapter_image_cursor] = "full_page_image"
 			left_bleed, right_bleed = _page_horizontal_bleeds(layout_mode, first_page_mode, chapter_image_cursor, bleed_inside, bleed_outside)
 			trim_rect = (0.0, 0.0, page_width, page_height)
 			bleed_rect = (
@@ -884,8 +935,6 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 			)
 			snap_rect = _resolve_snap_rect(image_snap_target, content_rect, trim_rect, bleed_rect)
 
-			max_width = min(image_max_width, max(1.0, snap_rect[2]-image_edge_gap))
-			max_height = min(image_max_height, max(1.0, snap_rect[3]-image_edge_gap))
 			override_width = None
 			override_height = None
 			explicit_edge = None
@@ -897,6 +946,22 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 				if override_height_mm is not None:
 					override_height = _mm_to_points(override_height_mm)
 				explicit_edge = image_instruction.get("snap_edge")
+
+			chosen_edge = None
+			physical_edge = None
+			if image_snap_to_edge:
+				chosen_edge = _choose_snap_edge(explicit_edge, image_allowed_edges, image_preferred_edges)
+				physical_edge = _resolve_semantic_edge(chosen_edge, is_right_page)
+
+			available_width = max(1.0, snap_rect[2] - image_spacing_left - image_spacing_right)
+			available_height = max(1.0, snap_rect[3] - image_spacing_top_used - image_spacing_bottom_used)
+			if physical_edge in ("left", "right"):
+				available_width = max(1.0, available_width - image_edge_gap)
+			if physical_edge in ("top", "bottom"):
+				available_height = max(1.0, available_height - image_edge_gap)
+
+			max_width = min(image_max_width, available_width)
+			max_height = min(image_max_height, available_height)
 
 			if override_width is not None and override_height is not None:
 				frame_width, frame_height = _fit_contain_dimensions(image_width, image_height, override_width, override_height)
@@ -910,9 +975,18 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 				frame_width, frame_height = _fit_contain_dimensions(image_width, image_height, max_width, max_height)
 
 			if image_snap_to_edge:
-				chosen_edge = _choose_snap_edge(explicit_edge, image_allowed_edges, image_preferred_edges)
-				physical_edge = _resolve_semantic_edge(chosen_edge, is_right_page)
-				image_x, image_y = _snap_frame_to_edge(snap_rect, frame_width, frame_height, physical_edge, image_edge_gap, is_right_page)
+				image_x, image_y = _snap_frame_to_edge(
+					snap_rect,
+					frame_width,
+					frame_height,
+					physical_edge,
+					image_edge_gap,
+					is_right_page,
+					image_spacing_left,
+					image_spacing_right,
+					image_spacing_top_used,
+					image_spacing_bottom_used,
+				)
 			else:
 				image_x = margin_left + image_spacing_left
 				image_y = image_body_top + image_spacing_top_used
@@ -927,7 +1001,7 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 		)
 		_load_image_compat(scribus, image_path, image_frame)
 		_set_scale_image_to_frame_compat(scribus, image_frame)
-		_apply_image_frame_style_compat(scribus, image_frame, image_border_rgb, image_border_width_pt)
+		_apply_image_frame_style_compat(scribus, image_frame, image_border_rgb_used, image_border_width_pt_used)
 		if not is_full_page:
 			_set_text_flow_mode_compat(scribus, image_frame)
 			_set_text_distances_sides_compat(
@@ -952,7 +1026,7 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 	_set_frame_text_compat(scribus, title_frame, title_text)
 	_set_frame_text_compat(scribus, body_frame, body_text)
 
-	current_page = start_page
+	current_page = chapter_image_cursor
 
 	# If Scribus reports overflow, grow the chain incrementally.
 	max_extra_pages = 20
@@ -982,8 +1056,10 @@ def main() -> int:
 
 	book_dir = Path(sys.argv[1]).resolve()
 	chapters_dir = book_dir / "chapters"
-	sla_path = book_dir / "out" / "example.sla"
-	pdf_path = book_dir / "out" / "example.pdf"
+	layout_plan = json.loads("{\"title\":\"The Roast to San Rosario\",\"images\":[{\"file\":\"chapters/1-the-road-to-san-rosario/the-road.png\",\"placement\":\"inline\",\"snap_edge\":\"outside\"},{\"file\":\"chapters/1-the-road-to-san-rosario/sunset-at-hotel-rosario.png\",\"placement\":\"inline\",\"snap_edge\":\"top\",\"width_mm\":140},{\"file\":\"chapters/2-the-people-who-stayed/desert-mission-at-golden-hour.png\",\"placement\":\"inline\",\"height_mm\":90},{\"file\":\"chapters/2-the-people-who-stayed/sunset-gathering-at-hotel-rosario.png\",\"placement\":\"full_page\",\"bleed\":true,\"border\":{\"width_pt\":0}}]}")
+	output_stem = _output_filename_stem(layout_plan, book_dir)
+	sla_path = book_dir / "out" / f"{output_stem}.sla"
+	pdf_path = book_dir / "out" / f"{output_stem}.pdf"
 
 	page_size = (841.8898, 595.2756)
 	margins = (
@@ -1013,7 +1089,7 @@ def main() -> int:
 	bleed_inside = 9.0142
 	bleed_outside = 9.0142
 	image_border_rgb = (255, 255, 255)
-	image_border_width_pt = 3.0000
+	image_border_width_pt = 11.0000
 	image_spacing_top = 14.1732
 	image_spacing_bottom = 14.1732
 	image_spacing_inside = 14.1732
@@ -1025,7 +1101,6 @@ def main() -> int:
 	image_allowed_edges = ["outside","inside","top","bottom"]
 	image_preferred_edges = ["outside","top"]
 	image_edge_gap = 0.0000
-	layout_plan = json.loads("{\"images\":[{\"file\":\"chapters/1-the-road-to-san-rosario/the-road.png\",\"placement\":\"inline\",\"snap_edge\":\"outside\"},{\"file\":\"chapters/1-the-road-to-san-rosario/sunset-at-hotel-rosario.png\",\"placement\":\"inline\",\"snap_edge\":\"top\",\"width_mm\":140},{\"file\":\"chapters/2-the-people-who-stayed/desert-mission-at-golden-hour.png\",\"placement\":\"inline\",\"height_mm\":90},{\"file\":\"chapters/2-the-people-who-stayed/sunset-gathering-at-hotel-rosario.png\",\"placement\":\"full_page\",\"bleed\":true}]}")
 	layout_index = _build_layout_index(layout_plan)
 	layout_mode = "facing_pages"
 	first_page_mode = "right"

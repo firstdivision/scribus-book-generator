@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,6 +111,18 @@ func TestWriteGeneratedScribusScript(t *testing.T) {
 	if !strings.Contains(text, "for image_index, image_path in enumerate(image_paths, start=1):") {
 		t.Fatalf("generated script missing per-image rendering loop")
 	}
+	if !strings.Contains(text, "continuation_frame = _create_text_frame_compat(") {
+		t.Fatalf("generated script should create continuation text frames on image pages")
+	}
+	if !strings.Contains(text, "_link_text_frames_compat(scribus, body_frames[-1], continuation_frame)") {
+		t.Fatalf("generated script should link image-page continuation text frames")
+	}
+	if !strings.Contains(text, "current_page = chapter_image_cursor") {
+		t.Fatalf("generated script should continue overflow from chapter_image_cursor")
+	}
+	if strings.Contains(text, "current_page = start_page") {
+		t.Fatalf("generated script should not reset overflow cursor back to start_page")
+	}
 	if !strings.Contains(text, "image_border_rgb = (255, 255, 255)") {
 		t.Fatalf("generated script missing image border rgb settings")
 	}
@@ -128,19 +141,25 @@ func TestWriteGeneratedScribusScript(t *testing.T) {
 	if !strings.Contains(text, "page_number_hide_on = [\"chapter_opening\",\"full_page_image\",\"blank\"]") {
 		t.Fatalf("generated script missing page number hide_on setting")
 	}
+	if !strings.Contains(text, "if is_full_page:\n\t\t\tpage_roles[chapter_image_cursor] = \"full_page_image\"") {
+		t.Fatalf("generated script should classify full-page image pages for page number suppression")
+	}
 	if !strings.Contains(text, "scribus.createMasterPage(master_page_name)") {
 		t.Fatalf("generated script missing master page creation")
 	}
 	if !strings.Contains(text, "scribus.applyMasterPage(master_page_name, page_number)") {
 		t.Fatalf("generated script missing master page application")
 	}
-	if !strings.Contains(text, "image_border_width_pt = 3.0000") {
+	expectedBorderWidth := fmt.Sprintf("image_border_width_pt = %.4f", cfg.Images.Border.WidthPt)
+	if !strings.Contains(text, expectedBorderWidth) {
 		t.Fatalf("generated script missing image border width setting")
 	}
-	if !strings.Contains(text, "image_spacing_top = 14.1732") {
+	expectedSpacingTop := fmt.Sprintf("image_spacing_top = %.4f", mmToPoints(cfg.Images.SpacingMM.Top))
+	if !strings.Contains(text, expectedSpacingTop) {
 		t.Fatalf("generated script missing image spacing top setting")
 	}
-	if !strings.Contains(text, "image_max_width = 311.8110") {
+	expectedMaxWidth := fmt.Sprintf("image_max_width = %.4f", mmToPoints(cfg.Images.Sizing.MaxWidthMM))
+	if !strings.Contains(text, expectedMaxWidth) {
 		t.Fatalf("generated script missing image max width setting")
 	}
 	if !strings.Contains(text, "image_snap_to_edge = True") {
@@ -149,11 +168,29 @@ func TestWriteGeneratedScribusScript(t *testing.T) {
 	if !strings.Contains(text, "layout_plan = json.loads(\"{\\\"images\\\":[]}\")") {
 		t.Fatalf("generated script missing layout plan payload")
 	}
+	if !strings.Contains(text, "output_stem = _output_filename_stem(layout_plan, book_dir)") {
+		t.Fatalf("generated script missing output filename resolution")
+	}
+	if !strings.Contains(text, "sla_path = book_dir / \"out\" / f\"{output_stem}.sla\"") {
+		t.Fatalf("generated script missing resolved SLA filename")
+	}
+	if !strings.Contains(text, "pdf_path = book_dir / \"out\" / f\"{output_stem}.pdf\"") {
+		t.Fatalf("generated script missing resolved PDF filename")
+	}
 	if !strings.Contains(text, "def _choose_snap_edge") {
 		t.Fatalf("generated script missing edge selection helper")
 	}
 	if !strings.Contains(text, "def _fit_contain_dimensions") {
 		t.Fatalf("generated script missing contain sizing helper")
+	}
+	if !strings.Contains(text, "def _snap_frame_to_edge(snap_rect, frame_width, frame_height, physical_edge, edge_gap, is_right_page, spacing_left, spacing_right, spacing_top, spacing_bottom):") {
+		t.Fatalf("generated script missing spacing-aware snap helper signature")
+	}
+	if !strings.Contains(text, "available_width = max(1.0, snap_rect[2] - image_spacing_left - image_spacing_right)") {
+		t.Fatalf("generated script missing wrap-aware width bound calculation")
+	}
+	if !strings.Contains(text, "available_height = max(1.0, snap_rect[3] - image_spacing_top_used - image_spacing_bottom_used)") {
+		t.Fatalf("generated script missing wrap-aware height bound calculation")
 	}
 	if !strings.Contains(text, "def _create_wrap_frame_compat") {
 		t.Fatalf("generated script missing wrap frame helper")
@@ -209,5 +246,47 @@ func TestWriteGeneratedScribusScriptSupportsNilPageBackground(t *testing.T) {
 	}
 	if !strings.Contains(text, "page_numbers_enabled = False") {
 		t.Fatalf("generated script missing disabled page number setting")
+	}
+}
+
+func TestWriteGeneratedScribusScriptIncludesImageBorderOverrideSupport(t *testing.T) {
+	scriptPath := filepath.Join(t.TempDir(), "scripts", "scribus_generate.py")
+	bookDir := filepath.Clean(filepath.Join("..", "..", "books", "sample-book"))
+	cfg, err := config.LoadForBook(bookDir)
+	if err != nil {
+		t.Fatalf("LoadForBook returned error: %v", err)
+	}
+
+	width := 0.0
+	plan := layoutplan.Plan{
+		Images: []layoutplan.ImageInstruction{
+			{
+				File:      "chapters/2-the-people-who-stayed/sunset-gathering-at-hotel-rosario.png",
+				Placement: layoutplan.PlacementFullPage,
+				Border: &layoutplan.Border{
+					WidthPt: &width,
+				},
+			},
+		},
+	}
+
+	if err := writeGeneratedScribusScript(scriptPath, cfg, plan); err != nil {
+		t.Fatalf("writeGeneratedScribusScript returned error: %v", err)
+	}
+
+	content, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("failed to read generated script: %v", err)
+	}
+
+	text := string(content)
+	if !strings.Contains(text, "def _resolve_border_override") {
+		t.Fatalf("generated script missing border override helper")
+	}
+	if !strings.Contains(text, "border_override = image_instruction.get(\"border\")") {
+		t.Fatalf("generated script missing border override lookup")
+	}
+	if !strings.Contains(text, "\\\"width_pt\\\":0") {
+		t.Fatalf("generated script missing width_pt override in embedded layout plan")
 	}
 }
