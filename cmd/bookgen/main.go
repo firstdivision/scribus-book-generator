@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,22 +19,35 @@ func main() {
 	}
 
 	bookDir := os.Args[1]
+	bookConfigPath := filepath.Join(bookDir, "book.yaml")
+	fmt.Printf("Loading configuration from %s\n", bookConfigPath)
 	cfg, err := config.LoadForBook(bookDir)
 	if err != nil {
 		panic(err)
 	}
+	fmt.Println("Using resolved configuration:")
+	configJSON, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(string(configJSON))
+
+	fmt.Printf("Finding chapter in %s\n", filepath.Join(bookDir, "chapters"))
 	chapterPath := firstChapterPath(bookDir)
+	fmt.Printf("Parsing chapter from %s\n", chapterPath)
 	chapter, err := markdown.ParseFile(chapterPath)
 	if err != nil {
 		panic(err)
 	}
 
-	outputPath := filepath.Join(bookDir, "out", "example.sla")
+	outputDir := filepath.Join(bookDir, "out")
+	outputPath := filepath.Join(outputDir, "example.sla")
+	fmt.Printf("Generating Scribus artifacts in %s\n", outputDir)
 	if err := renderer.GenerateSLA(cfg, outputPath, chapter, "images/placeholder.svg"); err != nil {
 		panic(err)
 	}
 
-	fmt.Printf("book generation scaffold initialized for %s\n", bookDir)
+	fmt.Printf("Generated Scribus artifacts in %s\n", outputDir)
 }
 
 func firstChapterPath(bookDir string) string {

@@ -73,6 +73,8 @@ template: a4-landscape.yaml
 go run ./cmd/bookgen books/sample-book/
 ```
 
+At startup, the command reports each generation stage, including the book configuration path, the fully resolved configuration after template defaults and overrides are applied, the selected chapter path, and the output path.
+
 The command writes output under `books/sample-book/out/`.
 
 ## Creating A Template
