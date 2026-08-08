@@ -74,12 +74,26 @@ def _first_markdown_file(chapter_dir: Path):
 
 
 def _image_files(chapter_dir: Path):
-	extensions = ("*.png", "*.jpg", "*.jpeg", "*.webp", "*.gif", "*.svg")
+	patterns = ["*.png", "*.jpg", "*.jpeg", "*.webp", "*.gif", "*.svg"]
 	results = []
-	for pattern in extensions:
+	seen = set()
+	for pattern in patterns:
 		for candidate in sorted(chapter_dir.glob(pattern)):
 			if candidate.name.startswith("."):
 				continue
+			candidate_key = candidate.resolve().as_posix() if candidate.exists() else candidate.as_posix()
+			if candidate_key in seen:
+				continue
+			seen.add(candidate_key)
+			results.append(candidate)
+	for pattern in patterns:
+		for candidate in sorted(chapter_dir.glob(pattern.upper())):
+			if candidate.name.startswith("."):
+				continue
+			candidate_key = candidate.resolve().as_posix() if candidate.exists() else candidate.as_posix()
+			if candidate_key in seen:
+				continue
+			seen.add(candidate_key)
 			results.append(candidate)
 	return results
 

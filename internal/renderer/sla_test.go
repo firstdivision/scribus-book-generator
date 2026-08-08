@@ -3,6 +3,7 @@ package renderer
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -224,6 +225,49 @@ func TestWriteGeneratedScribusScript(t *testing.T) {
 	}
 	if strings.Contains(text, "automatic_text_frames") {
 		t.Fatalf("generated script still references automatic_text_frames")
+	}
+}
+
+func TestGeneratedScribusScriptDiscoversUppercaseImageExtensions(t *testing.T) {
+	scriptPath := filepath.Join(t.TempDir(), "scripts", "scribus_generate.py")
+	bookDir := filepath.Clean(filepath.Join("..", "..", "books", "sample-book"))
+	cfg, err := config.LoadForBook(bookDir)
+	if err != nil {
+		t.Fatalf("LoadForBook returned error: %v", err)
+	}
+
+	if err := writeGeneratedScribusScript(scriptPath, cfg, layoutplan.Plan{}); err != nil {
+		t.Fatalf("writeGeneratedScribusScript returned error: %v", err)
+	}
+
+	chapterDir := filepath.Join(t.TempDir(), "chapters", "case-test")
+	if err := os.MkdirAll(chapterDir, 0o755); err != nil {
+		t.Fatalf("failed to create chapter dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chapterDir, "IMG_1234.JPG"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("failed to write uppercase image: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chapterDir, "img_5678.jpg"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("failed to write lowercase image: %v", err)
+	}
+
+	cmd := exec.Command("python3", "-c", `import importlib.util, pathlib, sys
+spec = importlib.util.spec_from_file_location("scribus_generate", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+results = [path.name for path in module._image_files(pathlib.Path(sys.argv[2]))]
+print("\n".join(results))`, scriptPath, chapterDir)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to execute generated script helper: %v\n%s", err, output)
+	}
+
+	text := strings.TrimSpace(string(output))
+	if !strings.Contains(text, "IMG_1234.JPG") {
+		t.Fatalf("expected generated helper to discover uppercase image, got output %q", text)
+	}
+	if !strings.Contains(text, "img_5678.jpg") {
+		t.Fatalf("expected generated helper to discover lowercase image, got output %q", text)
 	}
 }
 

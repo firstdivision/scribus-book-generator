@@ -57,12 +57,26 @@ def _first_markdown_file(chapter_dir: Path):
 
 
 def _image_files(chapter_dir: Path):
-	extensions = ("*.png", "*.jpg", "*.jpeg", "*.webp", "*.gif", "*.svg")
+	patterns = ["*.png", "*.jpg", "*.jpeg", "*.webp", "*.gif", "*.svg"]
 	results = []
-	for pattern in extensions:
+	seen = set()
+	for pattern in patterns:
 		for candidate in sorted(chapter_dir.glob(pattern)):
 			if candidate.name.startswith("."):
 				continue
+			candidate_key = candidate.resolve().as_posix() if candidate.exists() else candidate.as_posix()
+			if candidate_key in seen:
+				continue
+			seen.add(candidate_key)
+			results.append(candidate)
+	for pattern in patterns:
+		for candidate in sorted(chapter_dir.glob(pattern.upper())):
+			if candidate.name.startswith("."):
+				continue
+			candidate_key = candidate.resolve().as_posix() if candidate.exists() else candidate.as_posix()
+			if candidate_key in seen:
+				continue
+			seen.add(candidate_key)
 			results.append(candidate)
 	return results
 
@@ -1056,7 +1070,7 @@ def main() -> int:
 
 	book_dir = Path(sys.argv[1]).resolve()
 	chapters_dir = book_dir / "chapters"
-	layout_plan = json.loads("{\"title\":\"The Roast to San Rosario\",\"images\":[{\"file\":\"chapters/1-the-road-to-san-rosario/the-road.png\",\"placement\":\"inline\",\"snap_edge\":\"outside\"},{\"file\":\"chapters/1-the-road-to-san-rosario/sunset-at-hotel-rosario.png\",\"placement\":\"inline\",\"snap_edge\":\"top\",\"width_mm\":140},{\"file\":\"chapters/2-the-people-who-stayed/desert-mission-at-golden-hour.png\",\"placement\":\"inline\",\"height_mm\":90},{\"file\":\"chapters/2-the-people-who-stayed/sunset-gathering-at-hotel-rosario.png\",\"placement\":\"full_page\",\"bleed\":true,\"border\":{\"width_pt\":0}}]}")
+	layout_plan = json.loads("{\"images\":[]}")
 	output_stem = _output_filename_stem(layout_plan, book_dir)
 	sla_path = book_dir / "out" / f"{output_stem}.sla"
 	pdf_path = book_dir / "out" / f"{output_stem}.pdf"
@@ -1069,7 +1083,7 @@ def main() -> int:
 		36.0000,
 	)
 	page_size_constant = "PAPER_A4"
-	page_background_rgb = (248, 244, 232)
+	page_background_rgb = (246, 254, 255)
 	page_numbers_enabled = True
 	page_number_start_on_page = 1
 	page_number_start_number = 1
