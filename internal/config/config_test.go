@@ -41,8 +41,8 @@ func TestLoadForBookFromTemplate(t *testing.T) {
 	if cfg.PageBackgroundRGB == nil {
 		t.Fatalf("expected page background color to be loaded")
 	}
-	if *cfg.PageBackgroundRGB != [3]int{248, 244, 232} {
-		t.Fatalf("expected page background rgb [248 244 232], got %v", *cfg.PageBackgroundRGB)
+	if *cfg.PageBackgroundRGB != [3]int{246, 254, 255} {
+		t.Fatalf("expected page background rgb [246 254 255], got %v", *cfg.PageBackgroundRGB)
 	}
 	if !cfg.PageNumbers.Enabled {
 		t.Fatalf("expected page numbers to be enabled")
@@ -65,7 +65,7 @@ func TestLoadForBookFromTemplate(t *testing.T) {
 	if cfg.PageNumbers.OffsetMM.Top != 7 || cfg.PageNumbers.OffsetMM.Bottom != 7 || cfg.PageNumbers.OffsetMM.Inside != 10 || cfg.PageNumbers.OffsetMM.Outside != 10 {
 		t.Fatalf("unexpected page number offsets: %+v", cfg.PageNumbers.OffsetMM)
 	}
-	if cfg.ChapterHeadings.Font.Family != "Source Serif 4" || cfg.ChapterHeadings.Font.Style != "Semibold" || cfg.ChapterHeadings.Font.SizePt != 28 {
+	if cfg.ChapterHeadings.Font.Family != "URW Bookman" || cfg.ChapterHeadings.Font.Style != "Demi" || cfg.ChapterHeadings.Font.SizePt != 28 {
 		t.Fatalf("unexpected chapter heading font: %+v", cfg.ChapterHeadings.Font)
 	}
 	if cfg.ChapterHeadings.ColorRGB != [3]int{40, 40, 40} || cfg.ChapterHeadings.Alignment != "left" {

@@ -144,7 +144,7 @@ func TestWriteGeneratedScribusScript(t *testing.T) {
 	if !strings.Contains(text, "page_number_hide_on = [\"chapter_opening\",\"full_page_image\",\"blank\"]") {
 		t.Fatalf("generated script missing page number hide_on setting")
 	}
-	if !strings.Contains(text, "chapter_heading_font_name = \"Source Serif 4 Semibold\"") {
+	if !strings.Contains(text, "chapter_heading_font_name = \"URW Bookman Demi\"") {
 		t.Fatalf("generated script missing exact chapter heading font")
 	}
 	if !strings.Contains(text, "chapter_heading_font_size_pt = 28.0000") {
