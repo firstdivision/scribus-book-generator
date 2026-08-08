@@ -9,6 +9,7 @@ The generator currently:
 - loads a book template from YAML
 - reads chapter folders from `books/<book>/chapters/`
 - parses chapter markdown
+- styles chapter titles from the first Markdown H1 in each chapter
 - finds chapter-local images
 - creates flowing text frames across multiple pages
 - places chapter images with configurable frame styling and spacing
@@ -47,6 +48,18 @@ Rules:
 - Each chapter lives in its own folder.
 - Each chapter folder must contain at least one `.md` file.
 - Images are discovered from the same chapter folder.
+
+### Chapter Markdown
+
+The first Markdown H1 in a chapter file is its chapter title. The H1 marker is not included in the generated document, and following paragraphs continue as body text.
+
+```markdown
+# The Road to San Rosario
+
+There is a point, about forty miles after the last gas station...
+```
+
+A chapter without an H1 uses `Untitled Chapter` as its title. Additional H1 headings in the same file are rejected with a validation error; they are not treated as additional chapter titles.
 
 Example `book.yaml`:
 
@@ -90,6 +103,19 @@ safety_margin:
 	bottom: 12.7
 	inside: 12.7
 	outside: 12.7
+
+chapter_headings:
+	font:
+		family: Source Serif 4
+		style: Semibold
+		size_pt: 28
+
+	color_rgb: [40, 40, 40]
+	alignment: left
+
+	spacing_mm:
+		top: 20
+		bottom: 10
 
 images:
 	border:
@@ -186,6 +212,46 @@ page:
 ### `safety_margin`
 
 - `top`, `bottom`, `inside`, `outside`: text-safe margins in millimeters.
+
+### `chapter_headings`
+
+Controls the reusable Scribus paragraph style applied to the first H1 in each chapter file. Chapter-heading styling is separate from body text, captions, page numbers, and other text styles.
+
+#### `chapter_headings.font`
+
+- `family`: non-empty font family name
+- `style`: non-empty font style name
+- `size_pt`: font size in points, must be `> 0`
+
+The renderer combines `family` and `style` into an exact Scribus font name, such as `Source Serif 4 Semibold`. Generation fails with an error if that font is not available in Scribus; the renderer does not silently substitute another font.
+
+#### `chapter_headings.color_rgb`
+
+- Chapter-title text color as `[r, g, b]`
+- Must contain exactly three integers from `0` through `255`
+- A named Scribus color is created once and reused by the chapter-heading style
+
+#### `chapter_headings.alignment`
+
+Valid values:
+
+- `left`
+- `center`
+- `right`
+- `inside`
+- `outside`
+
+`inside` and `outside` resolve from the chapter-opening page side:
+
+- left page: `outside=left`, `inside=right`
+- right page: `inside=left`, `outside=right`
+
+#### `chapter_headings.spacing_mm`
+
+- `top`: vertical space before the chapter title, in millimeters; must be `>= 0`
+- `bottom`: vertical space between the title and first body paragraph, in millimeters; must be `>= 0`
+
+The renderer applies these values through text-frame geometry rather than inserting blank lines.
 
 ### `images`
 
@@ -319,6 +385,21 @@ Notes:
 
 ## Defaults
 
+If `chapter_headings` is omitted entirely, the generator uses these defaults:
+
+```yaml
+chapter_headings:
+	font:
+		family: Source Serif 4
+		style: Semibold
+		size_pt: 28
+	color_rgb: [40, 40, 40]
+	alignment: left
+	spacing_mm:
+		top: 20
+		bottom: 10
+```
+
 If `page_numbers` is omitted entirely, the generator uses these defaults:
 
 ```yaml
@@ -346,6 +427,7 @@ page_numbers:
 The current generator is deterministic and template-driven. It is focused on:
 
 - chapter opening pages
+- configurable chapter-title typography, color, alignment, and spacing
 - flowing body text
 - chapter-local image placement
 - page backgrounds

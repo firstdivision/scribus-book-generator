@@ -124,6 +124,8 @@ Only after Scribus generation works reliably should AI-generated layout instruct
 
 Architectural decisions should be documented under `docs/`.
 
+Always update `README.md` when functional behavior or user-facing configuration is added, removed, or changed. Document the supported fields, validation constraints, defaults, and any relevant limitations in the same change.
+
 When implementing a major feature, consult the relevant documents there rather than duplicating architecture rules in source files.
 
 If an implementation conflicts with these architectural rules, stop and explain the conflict before changing the architecture.
