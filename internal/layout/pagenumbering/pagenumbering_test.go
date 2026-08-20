@@ -101,3 +101,14 @@ func TestHideOnDoesNotChangeSequence(t *testing.T) {
 		t.Fatalf("expected physical page 9 to keep logical number 9, got %d ok=%v", value, ok)
 	}
 }
+
+func TestHideOnAcceptsChapterGalleryRole(t *testing.T) {
+	settings := DefaultSettings()
+	settings.HideOn = []PageRole{RoleChapterGallery}
+	if err := settings.Validate(); err != nil {
+		t.Fatalf("expected chapter_gallery hide_on role to be valid, got %v", err)
+	}
+	if !settings.HidesRole(RoleChapterGallery) {
+		t.Fatalf("expected chapter_gallery role to be hidden")
+	}
+}

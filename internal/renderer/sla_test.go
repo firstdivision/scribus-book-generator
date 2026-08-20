@@ -57,20 +57,28 @@ func TestCommittedScribusScriptContainsRendererHelpers(t *testing.T) {
 		"scribus.newDocument(paper_size, margins, orientation, first_page_number, unit_points, page_type, first_page_order, num_pages)",
 		"saveDocAs",
 		"def _render_basic_content",
+		"def _placeable_images",
+		"def _gallery_cell_rects",
+		"def _place_gallery_pages",
 		"def _image_dimensions_compat",
 		"def _apply_image_frame_style_compat",
 		"def _set_text_distances_sides_compat",
 		"createText",
 		"chapter_images = _image_files(chapter_dir)",
-		"for image_index, image_path in enumerate(image_paths, start=1):",
+		"placeable_images = _placeable_images(image_paths, layout_index, book_dir)",
+		"_set_frame_text_compat(scribus, body_frame, body_text)",
+		"while _text_overflows_compat(scribus, body_frames[-1]) and in_flow_index < len(placeable_images):",
 		"continuation_frame = _create_text_frame_compat(",
 		"_link_text_frames_compat(scribus, body_frames[-1], continuation_frame)",
-		"current_page = chapter_image_cursor",
+		"leftover_full_page = []",
+		"gallery_images = []",
+		"current_page, placed_count = _place_gallery_pages(",
 		"def _ensure_chapter_heading_styles_compat",
 		"Configured chapter heading font '{font_name}' is not available in Scribus",
 		"def _resolve_chapter_heading_alignment",
 		"title_top = margin_top + chapter_heading_spacing_top",
-		"if is_full_page:\n\t\t\tpage_roles[chapter_image_cursor] = \"full_page_image\"",
+		"if is_full_page:\n\t\tpage_roles[page_number] = \"full_page_image\"",
+		"current_page = _append_body_page_compat(scribus, current_page, \"chapter_gallery\"",
 		"scribus.createMasterPage(master_page_name)",
 		"scribus.applyMasterPage(master_page_name, page_number)",
 		"def _choose_snap_edge",
@@ -90,13 +98,25 @@ func TestCommittedScribusScriptContainsRendererHelpers(t *testing.T) {
 		"border_override = image_instruction.get(\"border\")",
 		"def _load_job",
 		"job = _load_job(job_path)",
+		"gallery_columns = images.get(\"gallery_columns\") or 2",
 	} {
 		if !strings.Contains(text, fragment) {
 			t.Fatalf("committed script missing %q", fragment)
 		}
 	}
-	if strings.Contains(text, "current_page = start_page") {
-		t.Fatal("script should not reset overflow cursor back to start_page")
+	setTextIdx := strings.Index(text, `_set_frame_text_compat(scribus, body_frame, body_text)`)
+	inFlowIdx := strings.Index(text, "while _text_overflows_compat(scribus, body_frames[-1]) and in_flow_index < len(placeable_images):")
+	overflowIdx := strings.Index(text, "max_extra_pages = 20")
+	leftoverIdx := strings.Index(text, "leftover_full_page = []")
+	galleryIdx := strings.Index(text, "current_page, placed_count = _place_gallery_pages(")
+	if setTextIdx < 0 || inFlowIdx < setTextIdx {
+		t.Fatal("body text must be set before in-flow images continue for overflow")
+	}
+	if overflowIdx < 0 || leftoverIdx < overflowIdx {
+		t.Fatal("leftover full-page pages must be appended after the text overflow loop")
+	}
+	if galleryIdx < leftoverIdx {
+		t.Fatal("gallery pages must come after leftover full-page pages")
 	}
 	if strings.Contains(text, "automatic_text_frames") {
 		t.Fatal("script still references automatic_text_frames")
@@ -137,6 +157,9 @@ func TestBuildScribusJobFromSampleBook(t *testing.T) {
 	}
 	if !job.Images.SnapToEdge {
 		t.Fatal("expected snap_to_edge")
+	}
+	if job.Images.GalleryColumns != 2 {
+		t.Fatalf("expected leftover gallery_columns 2, got %d", job.Images.GalleryColumns)
 	}
 
 	encoded, err := json.Marshal(job)
@@ -225,6 +248,72 @@ print("\n".join(results))`, committedScriptPath(t), chapterDir)
 	}
 	if !strings.Contains(text, "img_5678.jpg") {
 		t.Fatalf("expected helper to discover lowercase image, got output %q", text)
+	}
+}
+
+func TestScribusScriptPlaceableImagesSkipsIgnore(t *testing.T) {
+	cmd := exec.Command("python3", "-c", `import importlib.util, json, pathlib, sys, tempfile
+spec = importlib.util.spec_from_file_location("scribus_generate", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+book_dir = pathlib.Path(tempfile.mkdtemp())
+keep = book_dir / "chapters" / "1-the-road" / "keep.png"
+skip = book_dir / "chapters" / "1-the-road" / "outtake.png"
+keep.parent.mkdir(parents=True)
+keep.write_bytes(b"x")
+skip.write_bytes(b"x")
+layout_index = {
+    "chapters/1-the-road/outtake.png": {"file": "chapters/1-the-road/outtake.png", "placement": "ignore"},
+    "chapters/1-the-road/keep.png": {"file": "chapters/1-the-road/keep.png", "placement": "inline"},
+}
+names = [path.name for path in module._placeable_images([keep, skip], layout_index, book_dir)]
+print(json.dumps(names))`, committedScriptPath(t))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to execute placeable helper: %v\n%s", err, output)
+	}
+	var names []string
+	if err := json.Unmarshal(output, &names); err != nil {
+		t.Fatalf("decode helper output %q: %v", output, err)
+	}
+	if len(names) != 1 || names[0] != "keep.png" {
+		t.Fatalf("expected ignore to drop outtake.png, got %#v", names)
+	}
+}
+
+func TestScribusScriptGalleryCellRectsDoNotStretchShortRow(t *testing.T) {
+	cmd := exec.Command("python3", "-c", `import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("scribus_generate", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+full = module._gallery_cell_rects(4, 2, 10, 20, 400, 300, 10, 10)
+short = module._gallery_cell_rects(1, 2, 10, 20, 400, 300, 10, 10)
+print(json.dumps({"full": full, "short": short}))`, committedScriptPath(t))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to execute gallery helper: %v\n%s", err, output)
+	}
+	var parsed struct {
+		Full  [][]float64 `json:"full"`
+		Short [][]float64 `json:"short"`
+	}
+	if err := json.Unmarshal(output, &parsed); err != nil {
+		t.Fatalf("decode gallery output %q: %v", output, err)
+	}
+	if len(parsed.Full) != 4 || len(parsed.Short) != 1 {
+		t.Fatalf("unexpected cell counts full=%d short=%d", len(parsed.Full), len(parsed.Short))
+	}
+	if parsed.Short[0][2] != parsed.Full[0][2] || parsed.Short[0][3] != parsed.Full[0][3] {
+		t.Fatalf("short-row cell must keep full-grid size, full=%v short=%v", parsed.Full[0], parsed.Short[0])
+	}
+	if parsed.Short[0][2] >= 400 {
+		t.Fatalf("short-row cell should not stretch to content width, got %v", parsed.Short[0])
+	}
+	if parsed.Full[1][0] <= parsed.Full[0][0] || parsed.Full[1][1] != parsed.Full[0][1] {
+		t.Fatalf("expected row-major second cell to the right, got first=%v second=%v", parsed.Full[0], parsed.Full[1])
+	}
+	if parsed.Full[2][1] <= parsed.Full[0][1] || parsed.Full[2][0] != parsed.Full[0][0] {
+		t.Fatalf("expected third cell on the next row, got first=%v third=%v", parsed.Full[0], parsed.Full[2])
 	}
 }
 

@@ -44,11 +44,16 @@ type ImagePlacement struct {
 	EdgeGapMM    float64
 }
 
+type ImageLeftovers struct {
+	GalleryColumns int
+}
+
 type ImageDefaults struct {
 	Border    ImageBorder
 	SpacingMM ImageSpacing
 	Sizing    ImageSizing
 	Placement ImagePlacement
+	Leftovers ImageLeftovers
 }
 
 type imageTemplateConfig struct {
@@ -73,6 +78,9 @@ type imageTemplateConfig struct {
 		Preferred    []string `yaml:"preferred_edges"`
 		EdgeGapMM    *float64 `yaml:"edge_gap_mm"`
 	} `yaml:"placement"`
+	Leftovers struct {
+		GalleryColumns *int `yaml:"gallery_columns"`
+	} `yaml:"leftovers"`
 }
 
 func DefaultImageDefaults() ImageDefaults {
@@ -105,6 +113,9 @@ func DefaultImageDefaults() ImageDefaults {
 				ImageEdgeTop,
 			},
 			EdgeGapMM: 0,
+		},
+		Leftovers: ImageLeftovers{
+			GalleryColumns: 2,
 		},
 	}
 }
@@ -165,6 +176,9 @@ func parseImageDefaults(raw imageTemplateConfig, defaults ImageDefaults) (ImageD
 	if raw.Placement.EdgeGapMM != nil {
 		parsed.Placement.EdgeGapMM = *raw.Placement.EdgeGapMM
 	}
+	if raw.Leftovers.GalleryColumns != nil {
+		parsed.Leftovers.GalleryColumns = *raw.Leftovers.GalleryColumns
+	}
 
 	if err := parsed.Validate(); err != nil {
 		return parsed, err
@@ -216,6 +230,9 @@ func (d ImageDefaults) Validate() error {
 		if !allowed[edge] {
 			return fmt.Errorf("images.placement.preferred_edges contains %q which is not in allowed_edges", edge)
 		}
+	}
+	if d.Leftovers.GalleryColumns < 1 {
+		return fmt.Errorf("images.leftovers.gallery_columns must be >= 1")
 	}
 
 	return nil
