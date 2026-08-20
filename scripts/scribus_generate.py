@@ -1172,67 +1172,95 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 	return current_page
 
 
+def _as_rgb(value):
+	if value is None:
+		return None
+	return tuple(value)
+
+
+def _load_job(job_path: Path):
+	return json.loads(job_path.read_text(encoding="utf-8"))
+
+
 def main() -> int:
 	if len(sys.argv) < 2:
-		print("usage: scribus_generate.py <book-dir>", file=sys.stderr)
+		print("usage: scribus_generate.py <book-dir> [job-json]", file=sys.stderr)
 		return 2
 
 	book_dir = Path(sys.argv[1]).resolve()
+	job_path = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else book_dir / "out" / "scribus-job.json"
+	try:
+		job = _load_job(job_path)
+	except FileNotFoundError:
+		print(f"scribus job file not found: {job_path}", file=sys.stderr)
+		print("Run bookgen to write the job JSON, or pass the job path as the second argument.", file=sys.stderr)
+		return 2
+	except json.JSONDecodeError as exc:
+		print(f"invalid scribus job JSON: {job_path}: {exc}", file=sys.stderr)
+		return 2
+
 	chapters_dir = book_dir / "chapters"
-	layout_plan = json.loads("{\"images\":[]}")
+	layout_plan = job.get("layout") or {"images": []}
 	output_stem = _output_filename_stem(layout_plan, book_dir)
 	sla_path = book_dir / "out" / f"{output_stem}.sla"
 	pdf_path = book_dir / "out" / f"{output_stem}.pdf"
 
-	page_size = (841.8898, 595.2756)
-	margins = (
-		36.0000,
-		36.0000,
-		36.0000,
-		36.0000,
-	)
-	page_size_constant = "PAPER_A4"
-	page_background_rgb = (246, 254, 255)
-	page_numbers_enabled = True
-	page_number_start_on_page = 1
-	page_number_start_number = 1
-	page_number_format = "arabic"
-	page_number_position = "bottom_outside"
-	page_number_font_name = "Source Serif 4 Regular"
-	page_number_font_family = "Source Serif 4"
-	page_number_font_size_pt = 9.0000
-	page_number_color_rgb = (80, 80, 80)
-	page_number_offset_top = 19.8425
-	page_number_offset_bottom = 19.8425
-	page_number_offset_inside = 28.3465
-	page_number_offset_outside = 28.3465
-	page_number_hide_on = ["chapter_opening","full_page_image","blank"]
-	chapter_heading_font_name = "URW Bookman Demi"
-	chapter_heading_font_size_pt = 28.0000
-	chapter_heading_color_rgb = (40, 40, 40)
-	chapter_heading_alignment = "left"
-	chapter_heading_spacing_top = 56.6929
-	chapter_heading_spacing_bottom = 28.3465
-	bleed_top = 9.0142
-	bleed_bottom = 9.0142
-	bleed_inside = 9.0142
-	bleed_outside = 9.0142
-	image_border_rgb = (255, 255, 255)
-	image_border_width_pt = 11.0000
-	image_spacing_top = 14.1732
-	image_spacing_bottom = 14.1732
-	image_spacing_inside = 14.1732
-	image_spacing_outside = 14.1732
-	image_max_width = 311.8110
-	image_max_height = 283.4646
-	image_snap_to_edge = True
-	image_snap_target = "content_area"
-	image_allowed_edges = ["outside","inside","top","bottom"]
-	image_preferred_edges = ["outside","top"]
-	image_edge_gap = 0.0000
+	page = job["page"]
+	page_size = tuple(page["size_points"])
+	margins = tuple(page["margins_points"])
+	page_size_constant = page["size_constant"]
+	page_background_rgb = _as_rgb(page.get("background_rgb"))
+	layout_mode = page["layout"]
+	first_page_mode = page["first_page"]
+
+	page_numbers = job["page_numbers"]
+	page_numbers_enabled = page_numbers["enabled"]
+	page_number_start_on_page = page_numbers["start_on_page"]
+	page_number_start_number = page_numbers["start_number"]
+	page_number_format = page_numbers["format"]
+	page_number_position = page_numbers["position"]
+	page_number_font_name = page_numbers["font_name"]
+	page_number_font_family = page_numbers["font_family"]
+	page_number_font_size_pt = page_numbers["font_size_pt"]
+	page_number_color_rgb = tuple(page_numbers["color_rgb"])
+	page_number_offsets = page_numbers["offset_points"]
+	page_number_offset_top = page_number_offsets["top"]
+	page_number_offset_bottom = page_number_offsets["bottom"]
+	page_number_offset_inside = page_number_offsets["inside"]
+	page_number_offset_outside = page_number_offsets["outside"]
+	page_number_hide_on = page_numbers.get("hide_on") or []
+
+	headings = job["chapter_headings"]
+	chapter_heading_font_name = headings["font_name"]
+	chapter_heading_font_size_pt = headings["font_size_pt"]
+	chapter_heading_color_rgb = tuple(headings["color_rgb"])
+	chapter_heading_alignment = headings["alignment"]
+	heading_spacing = headings["spacing_points"]
+	chapter_heading_spacing_top = heading_spacing["top"]
+	chapter_heading_spacing_bottom = heading_spacing["bottom"]
+
+	bleed = job["bleed_points"]
+	bleed_top = bleed["top"]
+	bleed_bottom = bleed["bottom"]
+	bleed_inside = bleed["inside"]
+	bleed_outside = bleed["outside"]
+
+	images = job["images"]
+	image_border_rgb = tuple(images["border_rgb"])
+	image_border_width_pt = images["border_width_pt"]
+	image_spacing = images["spacing_points"]
+	image_spacing_top = image_spacing["top"]
+	image_spacing_bottom = image_spacing["bottom"]
+	image_spacing_inside = image_spacing["inside"]
+	image_spacing_outside = image_spacing["outside"]
+	image_max_width = images["max_width_points"]
+	image_max_height = images["max_height_points"]
+	image_snap_to_edge = images["snap_to_edge"]
+	image_snap_target = images["snap_target"]
+	image_allowed_edges = images.get("allowed_edges") or []
+	image_preferred_edges = images.get("preferred_edges") or []
+	image_edge_gap = images["edge_gap_points"]
 	layout_index = _build_layout_index(layout_plan)
-	layout_mode = "facing_pages"
-	first_page_mode = "right"
 	if not chapters_dir.exists():
 		print(f"chapters dir not found: {chapters_dir}", file=sys.stderr)
 		return 2

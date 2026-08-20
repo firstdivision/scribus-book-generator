@@ -1,8 +1,12 @@
 Scribus workflow for this project:
 
-Run the generator inside a real Scribus-enabled environment with:
+Prefer generating through the Go CLI, which writes out/scribus-job.json and invokes Scribus:
 
-scribus --python-script scripts/scribus_generate.py books/sample-book
+go run ./cmd/bookgen books/sample-book/
+
+To run the committed adapter directly after a job file exists:
+
+scribus -g -py scripts/scribus_generate.py books/sample-book books/sample-book/out/scribus-job.json
 
 Expected outputs (stem from layout.json title, or the book directory name):
 - books/sample-book/out/The Roast to San Rosario.sla
