@@ -73,9 +73,9 @@ template: a4-landscape.yaml
 go run ./cmd/bookgen books/sample-book/
 ```
 
-Use `-v` to print the fully resolved configuration after template defaults and overrides are applied.
+Use `-v` to print the fully resolved configuration and the chapter inventory after the book directory is loaded.
 
-The command loads `book.yaml` and `layout.json`, runs Scribus against the whole book directory, and writes `.sla` and `.pdf` files under `books/<book>/out/`. The file stem is the optional `title` in `layout.json`, or the book directory name if `title` is omitted.
+The command loads and validates the book folder (`book.yaml`, `layout.json`, chapter markdown, and image paths) before launching Scribus. It then writes `.sla` and `.pdf` files under `books/<book>/out/`. The file stem is the optional `title` in `layout.json`, or the book directory name if `title` is omitted.
 
 ```bash
 go run ./cmd/bookgen -v books/sample-book/
