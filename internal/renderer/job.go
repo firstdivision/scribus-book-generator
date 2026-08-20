@@ -92,6 +92,7 @@ type scribusJobImages struct {
 	AllowedEdges    []string        `json:"allowed_edges"`
 	PreferredEdges  []string        `json:"preferred_edges"`
 	EdgeGapPoints   float64         `json:"edge_gap_points"`
+	GalleryColumns  int             `json:"gallery_columns"`
 }
 
 // buildScribusJob converts resolved book config (millimetres, YAML enums) into
@@ -161,6 +162,7 @@ func buildScribusJob(cfg config.Config, plan layoutplan.Plan) scribusJob {
 			AllowedEdges:    imageEdges(cfg.Images.Placement.AllowedEdges),
 			PreferredEdges:  imageEdges(cfg.Images.Placement.Preferred),
 			EdgeGapPoints:   mmToPoints(cfg.Images.Placement.EdgeGapMM),
+			GalleryColumns:  cfg.Images.Leftovers.GalleryColumns,
 		},
 		Layout: json.RawMessage(plan.JSON()),
 	}

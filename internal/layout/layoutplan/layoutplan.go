@@ -15,6 +15,7 @@ type Placement string
 const (
 	PlacementInline   Placement = "inline"
 	PlacementFullPage Placement = "full_page"
+	PlacementIgnore   Placement = "ignore"
 )
 
 type Plan struct {
@@ -93,8 +94,8 @@ func (p Plan) Validate() error {
 				}
 			}
 		}
-		if image.Placement != "" && image.Placement != PlacementInline && image.Placement != PlacementFullPage {
-			return fmt.Errorf("layout.images[%d].placement must be one of inline, full_page", i)
+		if image.Placement != "" && image.Placement != PlacementInline && image.Placement != PlacementFullPage && image.Placement != PlacementIgnore {
+			return fmt.Errorf("layout.images[%d].placement must be one of inline, full_page, ignore", i)
 		}
 		if strings.TrimSpace(image.SnapEdge) != "" {
 			edge := imageplacement.Edge(strings.TrimSpace(image.SnapEdge))

@@ -957,8 +957,244 @@ def _start_chapter_on_right_page_compat(scribus, current_page, layout_mode, firs
 	return current_page
 
 
+def _image_is_ignored(image_instruction):
+	return bool(image_instruction and image_instruction.get("placement") == "ignore")
 
-def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_index, start_page, page_size, margins, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, chapter_heading_font_size_pt, chapter_heading_alignment, chapter_heading_spacing_top, chapter_heading_spacing_bottom, image_border_rgb, image_border_width_pt, image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside, image_max_width, image_max_height, image_snap_to_edge, image_snap_target, image_allowed_edges, image_preferred_edges, image_edge_gap, layout_index, book_dir, page_roles):
+
+def _image_is_full_page(image_instruction):
+	return bool(image_instruction and (image_instruction.get("placement") == "full_page" or image_instruction.get("bleed") is True))
+
+
+def _placeable_images(image_paths, layout_index, book_dir):
+	results = []
+	for image_path in image_paths:
+		instruction = _resolve_image_instruction(layout_index, book_dir, image_path)
+		if _image_is_ignored(instruction):
+			continue
+		results.append(image_path)
+	return results
+
+
+def _gallery_page_geometry(columns, content_width, content_height, gap_x, gap_y):
+	columns = max(1, int(columns))
+	gap_x = max(0.0, float(gap_x))
+	gap_y = max(0.0, float(gap_y))
+	content_width = max(1.0, float(content_width))
+	content_height = max(1.0, float(content_height))
+
+	cell_width = (content_width - gap_x * (columns - 1)) / float(columns)
+	if cell_width <= 0:
+		columns = 1
+		cell_width = content_width
+
+	cell_height = min(cell_width, content_height)
+	stride_y = cell_height + gap_y
+	if stride_y <= 0:
+		rows = 1
+	else:
+		rows = max(1, int((content_height + gap_y) // stride_y))
+
+	return columns, rows, cell_width, cell_height
+
+
+def _gallery_cell_rects(image_count, columns, content_x, content_y, content_width, content_height, gap_x, gap_y):
+	columns, _rows, cell_width, cell_height = _gallery_page_geometry(columns, content_width, content_height, gap_x, gap_y)
+	rects = []
+	for index in range(max(0, int(image_count))):
+		row = index // columns
+		col = index % columns
+		x = content_x + col * (cell_width + gap_x)
+		y = content_y + row * (cell_height + gap_y)
+		rects.append((x, y, cell_width, cell_height))
+	return rects
+
+
+def _place_chapter_image(scribus, image_path, image_index, chapter_index, page_number, page_size, margins, layout_mode, first_page_mode, bleed_inside, bleed_outside, bleed_top, bleed_bottom, image_body_top, image_body_height, image_border_rgb, image_border_width_pt, image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside, image_max_width, image_max_height, image_snap_to_edge, image_snap_target, image_allowed_edges, image_preferred_edges, image_edge_gap, layout_index, book_dir, page_roles):
+	page_width, page_height = _document_page_size_compat(scribus, page_size)
+	margin_top, margin_left, margin_right, margin_bottom = margins
+	content_width = page_width - margin_left - margin_right
+	is_right_page = layout_mode == "facing_pages" and _page_is_right_compat(layout_mode, first_page_mode, page_number)
+	image_spacing_left, image_spacing_right, image_spacing_top_used, image_spacing_bottom_used = _resolve_wrap_spacing(
+		is_right_page,
+		image_spacing_inside,
+		image_spacing_outside,
+		image_spacing_top,
+		image_spacing_bottom,
+	)
+
+	image_instruction = _resolve_image_instruction(layout_index, book_dir, image_path)
+	image_border_rgb_used, image_border_width_pt_used = _resolve_border_override(
+		image_instruction,
+		image_border_rgb,
+		image_border_width_pt,
+	)
+	is_full_page = _image_is_full_page(image_instruction)
+	image_width, image_height = _image_dimensions_compat(image_path)
+
+	if is_full_page:
+		page_roles[page_number] = "full_page_image"
+		left_bleed, right_bleed = _page_horizontal_bleeds(layout_mode, first_page_mode, page_number, bleed_inside, bleed_outside)
+		trim_rect = (0.0, 0.0, page_width, page_height)
+		bleed_rect = (
+			-left_bleed,
+			-bleed_top,
+			page_width + left_bleed + right_bleed,
+			page_height + bleed_top + bleed_bottom,
+		)
+		target_rect = bleed_rect if image_instruction and image_instruction.get("bleed") else trim_rect
+		image_x, image_y, frame_width, frame_height = target_rect
+	else:
+		content_rect = (margin_left, image_body_top, content_width, image_body_height)
+		left_bleed, right_bleed = _page_horizontal_bleeds(layout_mode, first_page_mode, page_number, bleed_inside, bleed_outside)
+		trim_rect = (0.0, 0.0, page_width, page_height)
+		bleed_rect = (
+			-left_bleed,
+			-bleed_top,
+			page_width + left_bleed + right_bleed,
+			page_height + bleed_top + bleed_bottom,
+		)
+		snap_rect = _resolve_snap_rect(image_snap_target, content_rect, trim_rect, bleed_rect)
+
+		override_width = None
+		override_height = None
+		explicit_edge = None
+		if image_instruction:
+			override_width_mm = image_instruction.get("width_mm")
+			override_height_mm = image_instruction.get("height_mm")
+			if override_width_mm is not None:
+				override_width = _mm_to_points(override_width_mm)
+			if override_height_mm is not None:
+				override_height = _mm_to_points(override_height_mm)
+			explicit_edge = image_instruction.get("snap_edge")
+
+		chosen_edge = None
+		physical_edge = None
+		if image_snap_to_edge:
+			chosen_edge = _choose_snap_edge(explicit_edge, image_allowed_edges, image_preferred_edges)
+			physical_edge = _resolve_semantic_edge(chosen_edge, is_right_page)
+
+		available_width = max(1.0, snap_rect[2] - image_spacing_left - image_spacing_right)
+		available_height = max(1.0, snap_rect[3] - image_spacing_top_used - image_spacing_bottom_used)
+		if physical_edge in ("left", "right"):
+			available_width = max(1.0, available_width - image_edge_gap)
+		if physical_edge in ("top", "bottom"):
+			available_height = max(1.0, available_height - image_edge_gap)
+
+		max_width = min(image_max_width, available_width)
+		max_height = min(image_max_height, available_height)
+
+		if override_width is not None and override_height is not None:
+			frame_width, frame_height = _fit_contain_dimensions(image_width, image_height, override_width, override_height)
+		elif override_width is not None and image_width > 0 and image_height > 0:
+			frame_width = override_width
+			frame_height = frame_width * (float(image_height) / float(image_width))
+		elif override_height is not None and image_width > 0 and image_height > 0:
+			frame_height = override_height
+			frame_width = frame_height * (float(image_width) / float(image_height))
+		else:
+			frame_width, frame_height = _fit_contain_dimensions(image_width, image_height, max_width, max_height)
+
+		if image_snap_to_edge:
+			image_x, image_y = _snap_frame_to_edge(
+				snap_rect,
+				frame_width,
+				frame_height,
+				physical_edge,
+				image_edge_gap,
+				is_right_page,
+				image_spacing_left,
+				image_spacing_right,
+				image_spacing_top_used,
+				image_spacing_bottom_used,
+			)
+		else:
+			image_x = margin_left + image_spacing_left
+			image_y = image_body_top + image_spacing_top_used
+
+	image_frame = _create_image_frame_compat(
+		scribus,
+		image_x,
+		image_y,
+		frame_width,
+		frame_height,
+		f"chapter_{chapter_index}_image_{image_index}",
+	)
+	_load_image_compat(scribus, image_path, image_frame)
+	_set_scale_image_to_frame_compat(scribus, image_frame)
+	_apply_image_frame_style_compat(scribus, image_frame, image_border_rgb_used, image_border_width_pt_used)
+	if not is_full_page:
+		_set_text_flow_mode_compat(scribus, image_frame)
+		_set_text_distances_sides_compat(
+			scribus,
+			image_frame,
+			image_spacing_left,
+			image_spacing_right,
+			image_spacing_top_used,
+			image_spacing_bottom_used,
+		)
+		_create_wrap_frame_compat(
+			scribus,
+			f"chapter_{chapter_index}_image_{image_index}",
+			image_x - image_spacing_left,
+			image_y - image_spacing_top_used,
+			frame_width + image_spacing_left + image_spacing_right,
+			frame_height + image_spacing_top_used + image_spacing_bottom_used,
+		)
+	else:
+		_set_text_flow_mode_compat(scribus, image_frame)
+
+
+def _place_gallery_pages(scribus, gallery_images, placed_count, chapter_index, current_page, page_size, margins, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, image_border_rgb, image_border_width_pt, image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside, gallery_columns, layout_index, book_dir, page_roles):
+	if not gallery_images:
+		return current_page, placed_count
+
+	page_width, page_height = _document_page_size_compat(scribus, page_size)
+	margin_top, margin_left, margin_right, margin_bottom = margins
+	content_x = margin_left
+	content_y = margin_top
+	content_width = page_width - margin_left - margin_right
+	content_height = page_height - margin_top - margin_bottom
+	gap_x = max(image_spacing_inside, image_spacing_outside)
+	gap_y = max(image_spacing_top, image_spacing_bottom)
+	columns, rows, _cell_width, _cell_height = _gallery_page_geometry(gallery_columns, content_width, content_height, gap_x, gap_y)
+	capacity = max(1, columns * rows)
+
+	offset = 0
+	while offset < len(gallery_images):
+		current_page = _append_body_page_compat(scribus, current_page, "chapter_gallery", layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size, page_roles)
+		_goto_page_compat(scribus, current_page)
+		batch = gallery_images[offset:offset + capacity]
+		rects = _gallery_cell_rects(len(batch), columns, content_x, content_y, content_width, content_height, gap_x, gap_y)
+		for image_path, cell in zip(batch, rects):
+			placed_count += 1
+			cell_x, cell_y, cell_width, cell_height = cell
+			image_instruction = _resolve_image_instruction(layout_index, book_dir, image_path)
+			image_border_rgb_used, image_border_width_pt_used = _resolve_border_override(
+				image_instruction,
+				image_border_rgb,
+				image_border_width_pt,
+			)
+			source_width, source_height = _image_dimensions_compat(image_path)
+			frame_width, frame_height = _fit_contain_dimensions(source_width, source_height, cell_width, cell_height)
+			image_x = cell_x + (cell_width - frame_width) / 2.0
+			image_y = cell_y + (cell_height - frame_height) / 2.0
+			image_frame = _create_image_frame_compat(
+				scribus,
+				image_x,
+				image_y,
+				frame_width,
+				frame_height,
+				f"chapter_{chapter_index}_image_{placed_count}",
+			)
+			_load_image_compat(scribus, image_path, image_frame)
+			_set_scale_image_to_frame_compat(scribus, image_frame)
+			_apply_image_frame_style_compat(scribus, image_frame, image_border_rgb_used, image_border_width_pt_used)
+		offset += capacity
+
+	return current_page, placed_count
+
+
+def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_index, start_page, page_size, margins, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, chapter_heading_font_size_pt, chapter_heading_alignment, chapter_heading_spacing_top, chapter_heading_spacing_bottom, image_border_rgb, image_border_width_pt, image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside, image_max_width, image_max_height, image_snap_to_edge, image_snap_target, image_allowed_edges, image_preferred_edges, image_edge_gap, gallery_columns, layout_index, book_dir, page_roles):
 	page_width, page_height = _document_page_size_compat(scribus, page_size)
 	margin_top, margin_left, margin_right, margin_bottom = margins
 
@@ -969,7 +1205,6 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 	chapter_opening_body_height = page_height - chapter_opening_body_top - margin_bottom
 	continuation_body_top = margin_top
 	continuation_body_height = page_height - continuation_body_top - margin_bottom
-	chapter_image_cursor = start_page
 
 	title_frame = _create_text_frame_compat(
 		scribus,
@@ -988,158 +1223,47 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 		f"chapter_{chapter_index}_body",
 	)
 	body_frames = [body_frame]
+	placeable_images = _placeable_images(image_paths, layout_index, book_dir)
+	in_flow_index = 0
+	placed_count = 0
+	current_page = start_page
 
-	for image_index, image_path in enumerate(image_paths, start=1):
-		if image_index > 1:
-			chapter_image_cursor = _append_body_page_compat(scribus, chapter_image_cursor, "body", layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size, page_roles)
-			_goto_page_compat(scribus, chapter_image_cursor)
-			continuation_frame = _create_text_frame_compat(
-				scribus,
-				margin_left,
-				continuation_body_top,
-				content_width,
-				continuation_body_height,
-				f"chapter_{chapter_index}_body_image_{image_index}",
-			)
-			_link_text_frames_compat(scribus, body_frames[-1], continuation_frame)
-			body_frames.append(continuation_frame)
-
-		is_right_page = layout_mode == "facing_pages" and _page_is_right_compat(layout_mode, first_page_mode, chapter_image_cursor)
-		image_spacing_left, image_spacing_right, image_spacing_top_used, image_spacing_bottom_used = _resolve_wrap_spacing(
-			is_right_page,
-			image_spacing_inside,
-			image_spacing_outside,
-			image_spacing_top,
-			image_spacing_bottom,
-		)
-
-		if chapter_image_cursor == start_page:
-			image_body_top = chapter_opening_body_top
-			image_body_height = chapter_opening_body_height
-		else:
-			image_body_top = continuation_body_top
-			image_body_height = continuation_body_height
-
-		image_instruction = _resolve_image_instruction(layout_index, book_dir, image_path)
-		image_border_rgb_used, image_border_width_pt_used = _resolve_border_override(
-			image_instruction,
+	if in_flow_index < len(placeable_images):
+		placed_count += 1
+		_place_chapter_image(
+			scribus,
+			placeable_images[in_flow_index],
+			placed_count,
+			chapter_index,
+			current_page,
+			page_size,
+			margins,
+			layout_mode,
+			first_page_mode,
+			bleed_inside,
+			bleed_outside,
+			bleed_top,
+			bleed_bottom,
+			chapter_opening_body_top,
+			chapter_opening_body_height,
 			image_border_rgb,
 			image_border_width_pt,
+			image_spacing_top,
+			image_spacing_bottom,
+			image_spacing_inside,
+			image_spacing_outside,
+			image_max_width,
+			image_max_height,
+			image_snap_to_edge,
+			image_snap_target,
+			image_allowed_edges,
+			image_preferred_edges,
+			image_edge_gap,
+			layout_index,
+			book_dir,
+			page_roles,
 		)
-		is_full_page = bool(image_instruction and (image_instruction.get("placement") == "full_page" or image_instruction.get("bleed") is True))
-		image_width, image_height = _image_dimensions_compat(image_path)
-
-		if is_full_page:
-			page_roles[chapter_image_cursor] = "full_page_image"
-			left_bleed, right_bleed = _page_horizontal_bleeds(layout_mode, first_page_mode, chapter_image_cursor, bleed_inside, bleed_outside)
-			trim_rect = (0.0, 0.0, page_width, page_height)
-			bleed_rect = (
-				-left_bleed,
-				-bleed_top,
-				page_width + left_bleed + right_bleed,
-				page_height + bleed_top + bleed_bottom,
-			)
-			target_rect = bleed_rect if image_instruction and image_instruction.get("bleed") else trim_rect
-			image_x, image_y, frame_width, frame_height = target_rect
-		else:
-			content_rect = (margin_left, image_body_top, content_width, image_body_height)
-			left_bleed, right_bleed = _page_horizontal_bleeds(layout_mode, first_page_mode, chapter_image_cursor, bleed_inside, bleed_outside)
-			trim_rect = (0.0, 0.0, page_width, page_height)
-			bleed_rect = (
-				-left_bleed,
-				-bleed_top,
-				page_width + left_bleed + right_bleed,
-				page_height + bleed_top + bleed_bottom,
-			)
-			snap_rect = _resolve_snap_rect(image_snap_target, content_rect, trim_rect, bleed_rect)
-
-			override_width = None
-			override_height = None
-			explicit_edge = None
-			if image_instruction:
-				override_width_mm = image_instruction.get("width_mm")
-				override_height_mm = image_instruction.get("height_mm")
-				if override_width_mm is not None:
-					override_width = _mm_to_points(override_width_mm)
-				if override_height_mm is not None:
-					override_height = _mm_to_points(override_height_mm)
-				explicit_edge = image_instruction.get("snap_edge")
-
-			chosen_edge = None
-			physical_edge = None
-			if image_snap_to_edge:
-				chosen_edge = _choose_snap_edge(explicit_edge, image_allowed_edges, image_preferred_edges)
-				physical_edge = _resolve_semantic_edge(chosen_edge, is_right_page)
-
-			available_width = max(1.0, snap_rect[2] - image_spacing_left - image_spacing_right)
-			available_height = max(1.0, snap_rect[3] - image_spacing_top_used - image_spacing_bottom_used)
-			if physical_edge in ("left", "right"):
-				available_width = max(1.0, available_width - image_edge_gap)
-			if physical_edge in ("top", "bottom"):
-				available_height = max(1.0, available_height - image_edge_gap)
-
-			max_width = min(image_max_width, available_width)
-			max_height = min(image_max_height, available_height)
-
-			if override_width is not None and override_height is not None:
-				frame_width, frame_height = _fit_contain_dimensions(image_width, image_height, override_width, override_height)
-			elif override_width is not None and image_width > 0 and image_height > 0:
-				frame_width = override_width
-				frame_height = frame_width * (float(image_height) / float(image_width))
-			elif override_height is not None and image_width > 0 and image_height > 0:
-				frame_height = override_height
-				frame_width = frame_height * (float(image_width) / float(image_height))
-			else:
-				frame_width, frame_height = _fit_contain_dimensions(image_width, image_height, max_width, max_height)
-
-			if image_snap_to_edge:
-				image_x, image_y = _snap_frame_to_edge(
-					snap_rect,
-					frame_width,
-					frame_height,
-					physical_edge,
-					image_edge_gap,
-					is_right_page,
-					image_spacing_left,
-					image_spacing_right,
-					image_spacing_top_used,
-					image_spacing_bottom_used,
-				)
-			else:
-				image_x = margin_left + image_spacing_left
-				image_y = image_body_top + image_spacing_top_used
-
-		image_frame = _create_image_frame_compat(
-			scribus,
-			image_x,
-			image_y,
-			frame_width,
-			frame_height,
-			f"chapter_{chapter_index}_image_{image_index}",
-		)
-		_load_image_compat(scribus, image_path, image_frame)
-		_set_scale_image_to_frame_compat(scribus, image_frame)
-		_apply_image_frame_style_compat(scribus, image_frame, image_border_rgb_used, image_border_width_pt_used)
-		if not is_full_page:
-			_set_text_flow_mode_compat(scribus, image_frame)
-			_set_text_distances_sides_compat(
-				scribus,
-				image_frame,
-				image_spacing_left,
-				image_spacing_right,
-				image_spacing_top_used,
-				image_spacing_bottom_used,
-			)
-			_create_wrap_frame_compat(
-				scribus,
-				f"chapter_{chapter_index}_image_{image_index}",
-				image_x - image_spacing_left,
-				image_y - image_spacing_top_used,
-				frame_width + image_spacing_left + image_spacing_right,
-				frame_height + image_spacing_top_used + image_spacing_bottom_used,
-			)
-		else:
-			_set_text_flow_mode_compat(scribus, image_frame)
+		in_flow_index += 1
 
 	_set_frame_text_compat(scribus, title_frame, title_text)
 	physical_heading_alignment = _resolve_chapter_heading_alignment(
@@ -1149,9 +1273,56 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 	_set_paragraph_style_compat(scribus, title_frame, _chapter_heading_style_name(physical_heading_alignment))
 	_set_frame_text_compat(scribus, body_frame, body_text)
 
-	current_page = chapter_image_cursor
+	while _text_overflows_compat(scribus, body_frames[-1]) and in_flow_index < len(placeable_images):
+		current_page = _append_body_page_compat(scribus, current_page, "body", layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size, page_roles)
+		_goto_page_compat(scribus, current_page)
+		placed_count += 1
+		continuation_frame = _create_text_frame_compat(
+			scribus,
+			margin_left,
+			continuation_body_top,
+			content_width,
+			continuation_body_height,
+			f"chapter_{chapter_index}_body_image_{placed_count}",
+		)
+		_link_text_frames_compat(scribus, body_frames[-1], continuation_frame)
+		body_frames.append(continuation_frame)
+		_place_chapter_image(
+			scribus,
+			placeable_images[in_flow_index],
+			placed_count,
+			chapter_index,
+			current_page,
+			page_size,
+			margins,
+			layout_mode,
+			first_page_mode,
+			bleed_inside,
+			bleed_outside,
+			bleed_top,
+			bleed_bottom,
+			continuation_body_top,
+			continuation_body_height,
+			image_border_rgb,
+			image_border_width_pt,
+			image_spacing_top,
+			image_spacing_bottom,
+			image_spacing_inside,
+			image_spacing_outside,
+			image_max_width,
+			image_max_height,
+			image_snap_to_edge,
+			image_snap_target,
+			image_allowed_edges,
+			image_preferred_edges,
+			image_edge_gap,
+			layout_index,
+			book_dir,
+			page_roles,
+		)
+		in_flow_index += 1
 
-	# If Scribus reports overflow, grow the chain incrementally.
+	# If Scribus reports overflow after in-flow images are exhausted, grow the chain incrementally.
 	max_extra_pages = 20
 	while _text_overflows_compat(scribus, body_frames[-1]) and max_extra_pages > 0:
 		current_page = _append_body_page_compat(scribus, current_page, "body", layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size, page_roles)
@@ -1168,6 +1339,81 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 		_link_text_frames_compat(scribus, body_frames[-1], next_frame)
 		body_frames.append(next_frame)
 		max_extra_pages -= 1
+
+	leftover_images = placeable_images[in_flow_index:]
+	leftover_full_page = []
+	gallery_images = []
+	for leftover_path in leftover_images:
+		instruction = _resolve_image_instruction(layout_index, book_dir, leftover_path)
+		if _image_is_full_page(instruction):
+			leftover_full_page.append(leftover_path)
+		else:
+			gallery_images.append(leftover_path)
+
+	for leftover_path in leftover_full_page:
+		current_page = _append_body_page_compat(scribus, current_page, "full_page_image", layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size, page_roles)
+		_goto_page_compat(scribus, current_page)
+		placed_count += 1
+		_place_chapter_image(
+			scribus,
+			leftover_path,
+			placed_count,
+			chapter_index,
+			current_page,
+			page_size,
+			margins,
+			layout_mode,
+			first_page_mode,
+			bleed_inside,
+			bleed_outside,
+			bleed_top,
+			bleed_bottom,
+			continuation_body_top,
+			continuation_body_height,
+			image_border_rgb,
+			image_border_width_pt,
+			image_spacing_top,
+			image_spacing_bottom,
+			image_spacing_inside,
+			image_spacing_outside,
+			image_max_width,
+			image_max_height,
+			image_snap_to_edge,
+			image_snap_target,
+			image_allowed_edges,
+			image_preferred_edges,
+			image_edge_gap,
+			layout_index,
+			book_dir,
+			page_roles,
+		)
+
+	current_page, placed_count = _place_gallery_pages(
+		scribus,
+		gallery_images,
+		placed_count,
+		chapter_index,
+		current_page,
+		page_size,
+		margins,
+		layout_mode,
+		first_page_mode,
+		page_background_rgb,
+		bleed_inside,
+		bleed_outside,
+		bleed_top,
+		bleed_bottom,
+		image_border_rgb,
+		image_border_width_pt,
+		image_spacing_top,
+		image_spacing_bottom,
+		image_spacing_inside,
+		image_spacing_outside,
+		gallery_columns,
+		layout_index,
+		book_dir,
+		page_roles,
+	)
 
 	return current_page
 
@@ -1260,6 +1506,7 @@ def main() -> int:
 	image_allowed_edges = images.get("allowed_edges") or []
 	image_preferred_edges = images.get("preferred_edges") or []
 	image_edge_gap = images["edge_gap_points"]
+	gallery_columns = images.get("gallery_columns") or 2
 	layout_index = _build_layout_index(layout_plan)
 	if not chapters_dir.exists():
 		print(f"chapters dir not found: {chapters_dir}", file=sys.stderr)
@@ -1352,6 +1599,7 @@ def main() -> int:
 				image_allowed_edges,
 				image_preferred_edges,
 				image_edge_gap,
+				gallery_columns,
 				layout_index,
 				book_dir,
 				page_roles,

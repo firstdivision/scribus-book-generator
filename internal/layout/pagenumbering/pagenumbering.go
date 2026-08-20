@@ -30,6 +30,7 @@ const (
 	RoleBody           PageRole = "body"
 	RoleChapterOpening PageRole = "chapter_opening"
 	RoleFullPageImage  PageRole = "full_page_image"
+	RoleChapterGallery PageRole = "chapter_gallery"
 	RoleBlank          PageRole = "blank"
 )
 
@@ -253,7 +254,7 @@ func isValidPosition(position Position) bool {
 
 func isValidRole(role PageRole) bool {
 	switch role {
-	case RoleBody, RoleChapterOpening, RoleFullPageImage, RoleBlank:
+	case RoleBody, RoleChapterOpening, RoleFullPageImage, RoleChapterGallery, RoleBlank:
 		return true
 	default:
 		return false

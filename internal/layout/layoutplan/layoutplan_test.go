@@ -30,6 +30,46 @@ func TestLoadFromBookDirSupportsFileField(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsIgnorePlacement(t *testing.T) {
+	width := 140.0
+	plan := Plan{Images: []ImageInstruction{{
+		File:      "chapters/1-the-road/outtake.png",
+		Placement: PlacementIgnore,
+		Bleed:     true,
+		WidthMM:   &width,
+	}}}
+	if err := plan.Validate(); err != nil {
+		t.Fatalf("expected ignore placement to be valid even with extra fields, got %v", err)
+	}
+}
+
+func TestValidateRejectsUnknownPlacement(t *testing.T) {
+	plan := Plan{Images: []ImageInstruction{{File: "images/ch01/a.jpg", Placement: "spread"}}}
+	err := plan.Validate()
+	if err == nil {
+		t.Fatalf("expected unknown placement error")
+	}
+	if !strings.Contains(err.Error(), "inline, full_page, ignore") {
+		t.Fatalf("expected placement error to list ignore, got %v", err)
+	}
+}
+
+func TestLoadFromBookDirSupportsIgnorePlacement(t *testing.T) {
+	bookDir := t.TempDir()
+	content := []byte("{\"images\":[{\"file\":\"chapters/1-the-road/outtake.png\",\"placement\":\"ignore\"}]}")
+	if err := os.WriteFile(filepath.Join(bookDir, "layout.json"), content, 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	plan, err := LoadFromBookDir(bookDir)
+	if err != nil {
+		t.Fatalf("LoadFromBookDir returned error: %v", err)
+	}
+	if len(plan.Images) != 1 || plan.Images[0].Placement != PlacementIgnore {
+		t.Fatalf("expected ignore placement, got %+v", plan.Images)
+	}
+}
+
 func TestValidateRejectsInvalidEdge(t *testing.T) {
 	plan := Plan{Images: []ImageInstruction{{File: "images/ch01/a.jpg", SnapEdge: "left"}}}
 	if err := plan.Validate(); err == nil {

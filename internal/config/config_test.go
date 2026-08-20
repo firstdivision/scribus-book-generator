@@ -89,6 +89,9 @@ func TestLoadForBookFromTemplate(t *testing.T) {
 	if cfg.Images.Placement.SnapTarget != ImageSnapTargetContentArea {
 		t.Fatalf("expected snap_target content_area, got %q", cfg.Images.Placement.SnapTarget)
 	}
+	if cfg.Images.Leftovers.GalleryColumns != 2 {
+		t.Fatalf("expected leftover gallery_columns default 2, got %d", cfg.Images.Leftovers.GalleryColumns)
+	}
 }
 
 func TestLoadForBookSupportsNullPageBackground(t *testing.T) {
@@ -172,6 +175,49 @@ func TestLoadForBookRejectsInvalidImageConfig(t *testing.T) {
 
 	if _, err := LoadForBook(bookDir); err == nil {
 		t.Fatalf("expected invalid image config to return an error")
+	}
+}
+
+func TestLoadForBookParsesLeftoverGalleryColumns(t *testing.T) {
+	bookDir := t.TempDir()
+	templateDir := filepath.Join(bookDir, "templates", "lulu")
+	if err := os.MkdirAll(templateDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(bookDir, "book.yaml"), []byte("template: a4-landscape.yaml\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile book.yaml returned error: %v", err)
+	}
+	template := []byte("document:\n  units: mm\npage:\n  size: A4\n  orientation: landscape\nimages:\n  leftovers:\n    gallery_columns: 3\n")
+	if err := os.WriteFile(filepath.Join(templateDir, "a4-landscape.yaml"), template, 0o644); err != nil {
+		t.Fatalf("WriteFile template returned error: %v", err)
+	}
+
+	cfg, err := LoadForBook(bookDir)
+	if err != nil {
+		t.Fatalf("LoadForBook returned error: %v", err)
+	}
+	if cfg.Images.Leftovers.GalleryColumns != 3 {
+		t.Fatalf("expected gallery_columns 3, got %d", cfg.Images.Leftovers.GalleryColumns)
+	}
+}
+
+func TestLoadForBookRejectsInvalidLeftoverGalleryColumns(t *testing.T) {
+	bookDir := t.TempDir()
+	templateDir := filepath.Join(bookDir, "templates", "lulu")
+	if err := os.MkdirAll(templateDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(bookDir, "book.yaml"), []byte("template: a4-landscape.yaml\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile book.yaml returned error: %v", err)
+	}
+	template := []byte("document:\n  units: mm\npage:\n  size: A4\n  orientation: landscape\nimages:\n  leftovers:\n    gallery_columns: 0\n")
+	if err := os.WriteFile(filepath.Join(templateDir, "a4-landscape.yaml"), template, 0o644); err != nil {
+		t.Fatalf("WriteFile template returned error: %v", err)
+	}
+
+	_, err := LoadForBook(bookDir)
+	if err == nil || !strings.Contains(err.Error(), "gallery_columns") {
+		t.Fatalf("expected gallery_columns validation error, got %v", err)
 	}
 }
 

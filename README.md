@@ -151,6 +151,9 @@ images:
 			- top
 		edge_gap_mm: 0
 
+	leftovers:
+		gallery_columns: 2
+
 page_numbers:
 	enabled: true
 	start_on_page: 1
@@ -294,6 +297,12 @@ For facing pages:
 
 Text wrap spacing remains separate from edge snap.
 
+#### `images.leftovers`
+
+- `gallery_columns`: columns in the end-of-chapter leftover gallery (`>= 1`, default `2`)
+
+Gallery pages fill the content area (margins), not bleed. Spacing between cells comes from `images.spacing_mm`.
+
 ### `layout.json`
 
 The optional top-level `title` names the generated `.sla` and `.pdf` files. If it is empty or omitted, the book directory name is used.
@@ -305,8 +314,14 @@ Book-level defaults come from template YAML, but individual images in `layout.js
 - `snap_edge`
 - `width_mm`
 - `height_mm`
-- `placement` (`inline` or `full_page`)
+- `placement` (`inline`, `full_page`, or `ignore`)
 - `bleed`
+
+`placement: ignore` keeps the file on disk and valid in `layout.json`, but the generator does not place it. Ignore wins over `bleed` and size overrides.
+
+```json
+{ "file": "chapters/1-the-road/outtake.png", "placement": "ignore" }
+```
 
 Precedence is:
 
@@ -315,6 +330,15 @@ Precedence is:
 3. built-in defaults
 
 If both `width_mm` and `height_mm` are set for an image, they are treated as a contain-fit bounding box (still preserving aspect ratio).
+
+#### Leftover images
+
+In-flow images are placed one per page only while body text still overflows. After the text chain fits (or images run out):
+
+- leftover images with `placement: full_page` or `bleed: true` each get a dedicated page, in leftover order, before the gallery
+- remaining leftovers pack into an end-of-chapter gallery (page role `chapter_gallery`)
+
+If every leftover is full-page, there is no gallery. The last gallery page may have a short row; cells are not stretched to fill the page.
 
 ### `page_numbers`
 
@@ -381,13 +405,14 @@ Valid values:
 - `body`
 - `chapter_opening`
 - `full_page_image`
+- `chapter_gallery`
 - `blank`
 
 Notes:
 
 - Hidden page numbers still participate in the numbering sequence.
-- The current generator actively uses `chapter_opening`, `body`, and `blank` roles.
-- `full_page_image` is recognized and validated now so templates can use it, and it is reserved for fuller layout support.
+- The generator uses `chapter_opening`, `body`, `full_page_image`, `chapter_gallery`, and `blank` roles.
+- `chapter_gallery` is assigned to leftover gallery pages so `hide_on` can target them.
 
 ## Defaults
 
