@@ -415,3 +415,27 @@ func TestWriteGeneratedScribusScriptIncludesImageBorderOverrideSupport(t *testin
 		t.Fatalf("generated script missing width_pt override in embedded layout plan")
 	}
 }
+
+func TestOutputPathsUsesLayoutTitle(t *testing.T) {
+	plan := layoutplan.Plan{Title: "The Roast to San Rosario"}
+	result := outputPaths("books/sample-book", plan)
+	if result.SLAPath != "books/sample-book/out/The Roast to San Rosario.sla" {
+		t.Fatalf("unexpected SLA path: %q", result.SLAPath)
+	}
+	if result.PDFPath != "books/sample-book/out/The Roast to San Rosario.pdf" {
+		t.Fatalf("unexpected PDF path: %q", result.PDFPath)
+	}
+}
+
+func TestOutputPathsFallsBackToBookDirectoryName(t *testing.T) {
+	result := outputPaths("/tmp/my-book", layoutplan.Plan{})
+	if result.SLAPath != "/tmp/my-book/out/my-book.sla" {
+		t.Fatalf("unexpected SLA path: %q", result.SLAPath)
+	}
+}
+
+func TestGenerateRequiresBookDirectory(t *testing.T) {
+	if _, err := Generate(""); err == nil {
+		t.Fatal("expected error for empty book directory")
+	}
+}

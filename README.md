@@ -73,9 +73,13 @@ template: a4-landscape.yaml
 go run ./cmd/bookgen books/sample-book/
 ```
 
-At startup, the command reports each generation stage, including the book configuration path, the fully resolved configuration after template defaults and overrides are applied, the selected chapter path, and the output path.
+Use `-v` to print the fully resolved configuration after template defaults and overrides are applied.
 
-The command writes output under `books/sample-book/out/`.
+The command loads `book.yaml` and `layout.json`, runs Scribus against the whole book directory, and writes `.sla` and `.pdf` files under `books/<book>/out/`. The file stem is the optional `title` in `layout.json`, or the book directory name if `title` is omitted.
+
+```bash
+go run ./cmd/bookgen -v books/sample-book/
+```
 
 ## Creating A Template
 

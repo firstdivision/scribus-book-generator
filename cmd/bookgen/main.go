@@ -2,85 +2,60 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"scribus-book-generator/internal/config"
-	"scribus-book-generator/internal/markdown"
 	"scribus-book-generator/internal/renderer"
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "usage: %s <book-dir>\n", filepath.Base(os.Args[0]))
-		os.Exit(2)
-	}
-
-	bookDir := os.Args[1]
-	bookConfigPath := filepath.Join(bookDir, "book.yaml")
-	fmt.Printf("Loading configuration from %s\n", bookConfigPath)
-	cfg, err := config.LoadForBook(bookDir)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println("Using resolved configuration:")
-	configJSON, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(string(configJSON))
-
-	fmt.Printf("Finding chapter in %s\n", filepath.Join(bookDir, "chapters"))
-	chapterPath := firstChapterPath(bookDir)
-	fmt.Printf("Parsing chapter from %s\n", chapterPath)
-	chapter, err := markdown.ParseFile(chapterPath)
-	if err != nil {
-		panic(err)
-	}
-
-	outputDir := filepath.Join(bookDir, "out")
-	outputPath := filepath.Join(outputDir, "example.sla")
-	fmt.Printf("Generating Scribus artifacts in %s\n", outputDir)
-	if err := renderer.GenerateSLA(cfg, outputPath, chapter, "images/placeholder.svg"); err != nil {
-		panic(err)
-	}
-
-	fmt.Printf("Generated Scribus artifacts in %s\n", outputDir)
+	os.Exit(run(os.Args[1:]))
 }
 
-func firstChapterPath(bookDir string) string {
-	chaptersDir := filepath.Join(bookDir, "chapters")
-	entries, err := os.ReadDir(chaptersDir)
+func run(args []string) int {
+	fs := flag.NewFlagSet("bookgen", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	verbose := fs.Bool("v", false, "print resolved configuration")
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, "usage: %s [-v] <book-dir>\n", filepath.Base(os.Args[0]))
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return 2
+	}
+
+	bookDir := fs.Arg(0)
+	fmt.Printf("Loading configuration from %s\n", filepath.Join(bookDir, "book.yaml"))
+	if *verbose {
+		cfg, err := config.LoadForBook(bookDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "bookgen: load configuration: %v\n", err)
+			return 1
+		}
+		fmt.Println("Using resolved configuration:")
+		configJSON, err := json.MarshalIndent(cfg, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "bookgen: encode configuration: %v\n", err)
+			return 1
+		}
+		fmt.Println(string(configJSON))
+	}
+
+	fmt.Printf("Generating Scribus artifacts from %s\n", bookDir)
+	result, err := renderer.Generate(bookDir)
 	if err != nil {
-		return filepath.Join(chaptersDir, "example.md")
+		fmt.Fprintf(os.Stderr, "bookgen: %v\n", err)
+		return 1
 	}
 
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		chapterEntries, readErr := os.ReadDir(filepath.Join(chaptersDir, entry.Name()))
-		if readErr != nil {
-			continue
-		}
-
-		for _, chapterEntry := range chapterEntries {
-			if chapterEntry.IsDir() || !strings.HasSuffix(chapterEntry.Name(), ".md") {
-				continue
-			}
-			return filepath.Join(chaptersDir, entry.Name(), chapterEntry.Name())
-		}
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-			continue
-		}
-		return filepath.Join(chaptersDir, entry.Name())
-	}
-
-	return filepath.Join(chaptersDir, "example.md")
+	fmt.Printf("wrote Scribus document: %s\n", result.SLAPath)
+	fmt.Printf("wrote PDF: %s\n", result.PDFPath)
+	return 0
 }
