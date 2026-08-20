@@ -15,4 +15,6 @@
 *.swp
 *.sla
 *.pdf
+__pycache__/
+*.pyc
 
