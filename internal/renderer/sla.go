@@ -10,7 +10,6 @@ import (
 
 	"scribus-book-generator/internal/config"
 	"scribus-book-generator/internal/layout/layoutplan"
-	"scribus-book-generator/internal/markdown"
 )
 
 const generatedScribusScriptPath = "scripts/scribus_generate.py"
@@ -1503,20 +1502,62 @@ func jsonStringSliceFromImageEdges(edges []config.ImageEdge) string {
 	return string(encoded)
 }
 
-func GenerateSLA(cfg config.Config, outputPath string, chapter markdown.Chapter, imagePath string) error {
-	_ = cfg
-	_ = chapter
-	_ = imagePath
-	bookDir := filepath.Dir(filepath.Dir(outputPath))
+// Result is the artifact paths Scribus writes for a book directory.
+type Result struct {
+	SLAPath string
+	PDFPath string
+}
+
+// Generate loads book configuration and layout.json, then runs Scribus.
+func Generate(bookDir string) (Result, error) {
+	if strings.TrimSpace(bookDir) == "" {
+		return Result{}, fmt.Errorf("book directory is required")
+	}
+	bookDir = filepath.Clean(bookDir)
+
+	cfg, err := config.LoadForBook(bookDir)
+	if err != nil {
+		return Result{}, fmt.Errorf("load configuration: %w", err)
+	}
+
 	plan, err := layoutplan.LoadFromBookDir(bookDir)
 	if err != nil {
-		return err
+		return Result{}, fmt.Errorf("load layout.json: %w", err)
 	}
+
 	if err := writeGeneratedScribusScript(generatedScribusScriptPath, cfg, plan); err != nil {
-		return err
+		return Result{}, fmt.Errorf("write Scribus script: %w", err)
 	}
+
 	cmd := buildScribusInvocation(bookDir)
-	return runCommand(cmd)
+	if err := runCommand(cmd); err != nil {
+		return Result{}, err
+	}
+
+	return outputPaths(bookDir, plan), nil
+}
+
+func outputPaths(bookDir string, plan layoutplan.Plan) Result {
+	stem := outputFilenameStem(plan.Title, filepath.Base(filepath.Clean(bookDir)))
+	outDir := filepath.Join(bookDir, "out")
+	return Result{
+		SLAPath: filepath.Join(outDir, stem+".sla"),
+		PDFPath: filepath.Join(outDir, stem+".pdf"),
+	}
+}
+
+func outputFilenameStem(title, bookDirName string) string {
+	stem := strings.TrimSpace(title)
+	if stem == "" {
+		stem = bookDirName
+	}
+	stem = strings.ReplaceAll(stem, "/", "-")
+	stem = strings.ReplaceAll(stem, "\\", "-")
+	stem = strings.TrimSpace(stem)
+	if stem == "" {
+		return bookDirName
+	}
+	return stem
 }
 
 func buildScribusInvocation(bookDir string) []string {
@@ -1527,7 +1568,10 @@ func runCommand(cmd []string) error {
 	command := exec.Command(cmd[0], cmd[1:]...)
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
-	return command.Run()
+	if err := command.Run(); err != nil {
+		return fmt.Errorf("run %s: %w", strings.Join(cmd, " "), err)
+	}
+	return nil
 }
 
 func writeGeneratedScribusScript(path string, cfg config.Config, plan layoutplan.Plan) error {
