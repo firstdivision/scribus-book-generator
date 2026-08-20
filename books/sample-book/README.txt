@@ -1,6 +1,8 @@
 Sample book input for initial testing.
 
 Expected structure:
-- chapters/01-intro.md
-- images/
-- out/
+- book.yaml
+- layout.json
+- chapters/<chapter-folder>/*.md
+- chapter-local images in the same folders
+- out/ (generated)

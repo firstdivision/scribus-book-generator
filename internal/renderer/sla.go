@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"scribus-book-generator/internal/book"
 	"scribus-book-generator/internal/config"
 	"scribus-book-generator/internal/layout/layoutplan"
 )
@@ -1508,33 +1509,27 @@ type Result struct {
 	PDFPath string
 }
 
-// Generate loads book configuration and layout.json, then runs Scribus.
+// Generate loads and validates a book directory, then runs Scribus.
 func Generate(bookDir string) (Result, error) {
-	if strings.TrimSpace(bookDir) == "" {
-		return Result{}, fmt.Errorf("book directory is required")
-	}
-	bookDir = filepath.Clean(bookDir)
-
-	cfg, err := config.LoadForBook(bookDir)
+	loaded, err := book.Load(bookDir)
 	if err != nil {
-		return Result{}, fmt.Errorf("load configuration: %w", err)
+		return Result{}, err
 	}
+	return GenerateFromBook(loaded)
+}
 
-	plan, err := layoutplan.LoadFromBookDir(bookDir)
-	if err != nil {
-		return Result{}, fmt.Errorf("load layout.json: %w", err)
-	}
-
-	if err := writeGeneratedScribusScript(generatedScribusScriptPath, cfg, plan); err != nil {
+// GenerateFromBook runs Scribus for an already loaded book.
+func GenerateFromBook(loaded book.Book) (Result, error) {
+	if err := writeGeneratedScribusScript(generatedScribusScriptPath, loaded.Config, loaded.Plan); err != nil {
 		return Result{}, fmt.Errorf("write Scribus script: %w", err)
 	}
 
-	cmd := buildScribusInvocation(bookDir)
+	cmd := buildScribusInvocation(loaded.Dir)
 	if err := runCommand(cmd); err != nil {
 		return Result{}, err
 	}
 
-	return outputPaths(bookDir, plan), nil
+	return outputPaths(loaded.Dir, loaded.Plan), nil
 }
 
 func outputPaths(bookDir string, plan layoutplan.Plan) Result {
