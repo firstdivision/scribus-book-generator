@@ -1,5 +1,25 @@
 # scribus-book-generator
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Book Structure](#book-structure)
+  - [Chapter Markdown](#chapter-markdown)
+- [Running The Generator](#running-the-generator)
+  - [Converting HEIC Images](#converting-heic-images)
+- [Creating A Template](#creating-a-template)
+- [Template Fields](#template-fields)
+  - [document](#document)
+  - [page](#page)
+  - [bleed](#bleed)
+  - [safety_margin](#safety_margin)
+  - [chapter_headings](#chapter_headings)
+  - [images](#images)
+  - [layout.json](#layoutjson)
+  - [page_numbers](#page_numbers)
+- [Defaults](#defaults)
+- [Current Scope](#current-scope)
+
 ## Overview
 
 `scribus-book-generator` turns a structured book directory into an editable Scribus `.sla` document and a PDF preview.
