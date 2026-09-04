@@ -72,6 +72,10 @@ func TestCommittedScribusScriptContainsRendererHelpers(t *testing.T) {
 		"_link_text_frames_compat(scribus, body_frames[-1], continuation_frame)",
 		"leftover_full_page = []",
 		"gallery_images = []",
+		"def _gallery_effective_columns",
+		"columns = _gallery_effective_columns(image_count, columns)",
+		"def _place_full_page_image",
+		"single_gallery_page = len(gallery_images) == 1",
 		"current_page, placed_count = _place_gallery_pages(",
 		"def _ensure_chapter_heading_styles_compat",
 		"Configured chapter heading font '{font_name}' is not available in Scribus",
@@ -158,8 +162,8 @@ func TestBuildScribusJobFromSampleBook(t *testing.T) {
 	if !job.Images.SnapToEdge {
 		t.Fatal("expected snap_to_edge")
 	}
-	if job.Images.GalleryColumns != 2 {
-		t.Fatalf("expected leftover gallery_columns 2, got %d", job.Images.GalleryColumns)
+	if job.Images.GalleryColumns != cfg.Images.Leftovers.GalleryColumns {
+		t.Fatalf("expected job gallery_columns to mirror config value %d, got %d", cfg.Images.Leftovers.GalleryColumns, job.Images.GalleryColumns)
 	}
 
 	encoded, err := json.Marshal(job)
@@ -303,17 +307,122 @@ print(json.dumps({"full": full, "short": short}))`, committedScriptPath(t))
 	if len(parsed.Full) != 4 || len(parsed.Short) != 1 {
 		t.Fatalf("unexpected cell counts full=%d short=%d", len(parsed.Full), len(parsed.Short))
 	}
-	if parsed.Short[0][2] != parsed.Full[0][2] || parsed.Short[0][3] != parsed.Full[0][3] {
-		t.Fatalf("short-row cell must keep full-grid size, full=%v short=%v", parsed.Full[0], parsed.Short[0])
+	// A lone image gets one centered cell spanning the content width (height stays square-capped).
+	if parsed.Short[0][0] != 10 || parsed.Short[0][1] != 20 {
+		t.Fatalf("single-cell gallery must start at the content origin, got %v", parsed.Short[0])
 	}
-	if parsed.Short[0][2] >= 400 {
-		t.Fatalf("short-row cell should not stretch to content width, got %v", parsed.Short[0])
+	if parsed.Short[0][2] != 400 || parsed.Short[0][3] != 300 {
+		t.Fatalf("single-cell gallery must span the content area, got %v", parsed.Short[0])
+	}
+	if parsed.Full[0][2] != 195 {
+		t.Fatalf("full-grid cell width should be 195, got %v", parsed.Full[0])
 	}
 	if parsed.Full[1][0] <= parsed.Full[0][0] || parsed.Full[1][1] != parsed.Full[0][1] {
 		t.Fatalf("expected row-major second cell to the right, got first=%v second=%v", parsed.Full[0], parsed.Full[1])
 	}
 	if parsed.Full[2][1] <= parsed.Full[0][1] || parsed.Full[2][0] != parsed.Full[0][0] {
 		t.Fatalf("expected third cell on the next row, got first=%v third=%v", parsed.Full[0], parsed.Full[2])
+	}
+}
+
+func TestScribusScriptGalleryCellRectsCentered(t *testing.T) {
+	cmd := exec.Command("python3", "-c", `import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("scribus_generate", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+four_in_four = module._gallery_cell_rects(4, 4, 10, 20, 400, 300, 10, 10)
+two_in_four = module._gallery_cell_rects(2, 4, 10, 20, 400, 300, 10, 10)
+print(json.dumps({"four": four_in_four, "two": two_in_four}))`, committedScriptPath(t))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to execute gallery helper: %v\n%s", err, output)
+	}
+	var parsed struct {
+		Four [][]float64 `json:"four"`
+		Two  [][]float64 `json:"two"`
+	}
+	if err := json.Unmarshal(output, &parsed); err != nil {
+		t.Fatalf("decode gallery output %q: %v", output, err)
+	}
+
+	// 4 images in 4 columns: single row of height 92.5 centered in content_height=300 (top margin 20).
+	// offset_y = (300 - 92.5) / 2 = 103.75 -> y = 20 + 103.75 = 123.75
+	if len(parsed.Four) != 4 {
+		t.Fatalf("expected 4 rects, got %d", len(parsed.Four))
+	}
+	for i, r := range parsed.Four {
+		if r[1] != 123.75 {
+			t.Fatalf("rect %d expected y=123.75 (vertically centered), got %f", i, r[1])
+		}
+	}
+
+	// 2 images in 4 columns: effective columns collapse to 2, giving equal-width
+	// cells that fill the content width (centered by construction).
+	// cell_width = (400 - 10) / 2 = 195 -> first x = 10, second x = 215.
+	if len(parsed.Two) != 2 {
+		t.Fatalf("expected 2 rects, got %d", len(parsed.Two))
+	}
+	if parsed.Two[0][0] != 10.0 {
+		t.Fatalf("expected first rect x=10.0 (content edge), got %f", parsed.Two[0][0])
+	}
+	if parsed.Two[1][0] != 215.0 {
+		t.Fatalf("expected second rect x=215.0, got %f", parsed.Two[1][0])
+	}
+	if parsed.Two[0][1] != 72.5 || parsed.Two[1][1] != 72.5 {
+		t.Fatalf("expected y=72.5 (vertically centered), got %f, %f", parsed.Two[0][1], parsed.Two[1][1])
+	}
+}
+
+func TestScribusScriptGalleryEffectiveColumns(t *testing.T) {
+	cmd := exec.Command("python3", "-c", `import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("scribus_generate", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+cases = [
+    (1, 4),
+    (2, 4),
+    (3, 4),
+    (4, 4),
+    (5, 4),
+    (5, 5),
+    (6, 4),
+    (7, 4),
+    (9, 4),
+]
+print(json.dumps([module._gallery_effective_columns(count, columns) for count, columns in cases]))`, committedScriptPath(t))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to execute gallery helper: %v\n%s", err, output)
+	}
+	var got []int
+	if err := json.Unmarshal(output, &got); err != nil {
+		t.Fatalf("decode gallery output %q: %v", output, err)
+	}
+	want := []int{1, 2, 3, 4, 4, 5, 3, 4, 3}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d results, got %d", len(want), len(got))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("case %d: expected %d effective columns, got %d", i, want[i], got[i])
+		}
+	}
+}
+
+func TestScribusScriptSingleLeftoverImageGetsFullPage(t *testing.T) {
+	content, err := os.ReadFile(committedScriptPath(t))
+	if err != nil {
+		t.Fatalf("read script: %v", err)
+	}
+	text := string(content)
+	singleIdx := strings.Index(text, "single_gallery_page = len(gallery_images) == 1")
+	fullPageIdx := strings.Index(text, "\t\t_place_full_page_image(")
+	galleryIdx := strings.Index(text, "current_page, placed_count = _place_gallery_pages(")
+	if singleIdx < 0 || fullPageIdx < 0 || galleryIdx < 0 {
+		t.Fatal("script must route a single leftover image to a dedicated full-page placement")
+	}
+	if !(singleIdx < fullPageIdx && fullPageIdx < galleryIdx) {
+		t.Fatal("single leftover full-page placement must run before the gallery placement")
 	}
 }
 

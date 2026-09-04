@@ -10,7 +10,78 @@ import (
 )
 
 func TestLoadForBookFromTemplate(t *testing.T) {
-	bookDir := filepath.Clean(filepath.Join("..", "..", "books", "sample-book"))
+	bookDir := t.TempDir()
+	templateDir := filepath.Join(bookDir, "templates", "lulu")
+	if err := os.MkdirAll(templateDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+
+	bookConfig := []byte("template: a4-landscape.yaml\n")
+	if err := os.WriteFile(filepath.Join(bookDir, "book.yaml"), bookConfig, 0o644); err != nil {
+		t.Fatalf("WriteFile book.yaml returned error: %v", err)
+	}
+
+	template := []byte(`document:
+  units: mm
+  layout: facing_pages
+  first_page: right
+page:
+  size: A4
+  orientation: landscape
+  background_color_rgb: [245, 235, 220]
+bleed:
+  top: 3.18
+  bottom: 3.18
+  inside: 3.18
+  outside: 3.18
+safety_margin:
+  top: 12.7
+  bottom: 12.7
+  inside: 12.7
+  outside: 12.7
+chapter_headings:
+  font:
+    family: URW Bookman
+    style: Demi
+    size_pt: 28
+  color_rgb: [40, 40, 40]
+  alignment: left
+  spacing_mm:
+    top: 20
+    bottom: 10
+images:
+  sizing:
+    max_width_mm: 110
+    max_height_mm: 100
+  placement:
+    snap_to_edge: true
+    snap_target: content_area
+  leftovers:
+    gallery_columns: 4
+page_numbers:
+  enabled: true
+  start_on_page: 1
+  start_number: 1
+  format: arabic
+  position: bottom_outside
+  font:
+    family: Source Serif 4
+    style: Regular
+    size_pt: 9
+  color_rgb: [80, 80, 80]
+  offset_mm:
+    top: 7
+    bottom: 7
+    inside: 10
+    outside: 10
+  hide_on:
+    - chapter_opening
+    - full_page_image
+    - blank
+`)
+	if err := os.WriteFile(filepath.Join(templateDir, "a4-landscape.yaml"), template, 0o644); err != nil {
+		t.Fatalf("WriteFile template returned error: %v", err)
+	}
 
 	cfg, err := LoadForBook(bookDir)
 	if err != nil {
@@ -41,8 +112,8 @@ func TestLoadForBookFromTemplate(t *testing.T) {
 	if cfg.PageBackgroundRGB == nil {
 		t.Fatalf("expected page background color to be loaded")
 	}
-	if *cfg.PageBackgroundRGB != [3]int{246, 254, 255} {
-		t.Fatalf("expected page background rgb [246 254 255], got %v", *cfg.PageBackgroundRGB)
+	if *cfg.PageBackgroundRGB != [3]int{245, 235, 220} {
+		t.Fatalf("expected page background rgb [245 235 220], got %v", *cfg.PageBackgroundRGB)
 	}
 	if !cfg.PageNumbers.Enabled {
 		t.Fatalf("expected page numbers to be enabled")
@@ -89,8 +160,8 @@ func TestLoadForBookFromTemplate(t *testing.T) {
 	if cfg.Images.Placement.SnapTarget != ImageSnapTargetContentArea {
 		t.Fatalf("expected snap_target content_area, got %q", cfg.Images.Placement.SnapTarget)
 	}
-	if cfg.Images.Leftovers.GalleryColumns != 2 {
-		t.Fatalf("expected leftover gallery_columns default 2, got %d", cfg.Images.Leftovers.GalleryColumns)
+	if cfg.Images.Leftovers.GalleryColumns != 4 {
+		t.Fatalf("expected leftover gallery_columns 4 from template, got %d", cfg.Images.Leftovers.GalleryColumns)
 	}
 }
 

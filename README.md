@@ -333,9 +333,9 @@ Text wrap spacing remains separate from edge snap.
 
 #### `images.leftovers`
 
-- `gallery_columns`: columns in the end-of-chapter leftover gallery (`>= 1`, default `2`)
+- `gallery_columns`: maximum columns in the end-of-chapter leftover gallery (`>= 1`, default `2`)
 
-Gallery pages fill the content area (margins), not bleed. Spacing between cells comes from `images.spacing_mm`.
+Gallery pages fill the content area (margins), not bleed. Spacing between cells comes from `images.spacing_mm`. When a page holds fewer images than `gallery_columns`, the grid collapses to the image count so the row stays centered with equal blank space on all sides; a lone image is promoted to a dedicated full-page (no bleed) page instead of a gallery cell.
 
 ### `layout.json`
 
@@ -370,9 +370,10 @@ If both `width_mm` and `height_mm` are set for an image, they are treated as a c
 In-flow images are placed one per page only while body text still overflows. After the text chain fits (or images run out):
 
 - leftover images with `placement: full_page` or `bleed: true` each get a dedicated page, in leftover order, before the gallery
+- a single remaining leftover is treated as `full_page` without bleed (contain-fit and centered inside the margins)
 - remaining leftovers pack into an end-of-chapter gallery (page role `chapter_gallery`)
 
-If every leftover is full-page, there is no gallery. The last gallery page may have a short row; cells are not stretched to fill the page.
+If every leftover is full-page, there is no gallery. Gallery pages center the occupied cells vertically and horizontally: the last page may hold a short row, and the grid adapts its column count so the row is centered rather than stretched.
 
 ### `page_numbers`
 

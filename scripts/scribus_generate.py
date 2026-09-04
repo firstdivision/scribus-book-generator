@@ -1035,15 +1035,46 @@ def _gallery_page_geometry(columns, content_width, content_height, gap_x, gap_y)
 	return columns, rows, cell_width, cell_height
 
 
+def _gallery_effective_columns(image_count, configured_columns):
+	configured_columns = max(1, int(configured_columns))
+	image_count = max(0, int(image_count))
+	if image_count <= 0:
+		return configured_columns
+	if image_count <= configured_columns:
+		return image_count
+	remainder = image_count % configured_columns
+	if remainder == 0:
+		return configured_columns
+	for columns in range(configured_columns - 1, 1, -1):
+		if image_count % columns == 0:
+			return columns
+	return configured_columns
+
+
 def _gallery_cell_rects(image_count, columns, content_x, content_y, content_width, content_height, gap_x, gap_y):
+	columns = _gallery_effective_columns(image_count, columns)
 	columns, _rows, cell_width, cell_height = _gallery_page_geometry(columns, content_width, content_height, gap_x, gap_y)
+	image_count = max(0, int(image_count))
+	if image_count == 0:
+		return []
+
+	actual_rows = (image_count + columns - 1) // columns
+	total_height = actual_rows * cell_height + max(0, actual_rows - 1) * gap_y
+	offset_y = max(0.0, (content_height - total_height) / 2.0)
+	start_y = content_y + offset_y
+
 	rects = []
-	for index in range(max(0, int(image_count))):
-		row = index // columns
-		col = index % columns
-		x = content_x + col * (cell_width + gap_x)
-		y = content_y + row * (cell_height + gap_y)
-		rects.append((x, y, cell_width, cell_height))
+	for row in range(actual_rows):
+		row_start = row * columns
+		row_count = min(columns, image_count - row_start)
+		row_width = row_count * cell_width + max(0, row_count - 1) * gap_x
+		offset_x = max(0.0, (content_width - row_width) / 2.0)
+		start_x = content_x + offset_x
+
+		y = start_y + row * (cell_height + gap_y)
+		for col in range(row_count):
+			x = start_x + col * (cell_width + gap_x)
+			rects.append((x, y, cell_width, cell_height))
 	return rects
 
 
@@ -1073,16 +1104,17 @@ def _place_chapter_image(scribus, image_path, image_index, chapter_index, page_n
 
 	if is_full_page:
 		page_roles[page_number] = "full_page_image"
-		left_bleed, right_bleed = _page_horizontal_bleeds(layout_mode, first_page_mode, page_number, bleed_inside, bleed_outside)
-		trim_rect = (0.0, 0.0, page_width, page_height)
-		bleed_rect = (
-			-left_bleed,
-			-bleed_top,
-			page_width + left_bleed + right_bleed,
-			page_height + bleed_top + bleed_bottom,
-		)
-		target_rect = bleed_rect if image_instruction and image_instruction.get("bleed") else trim_rect
-		image_x, image_y, frame_width, frame_height = target_rect
+		if image_instruction and image_instruction.get("bleed"):
+			left_bleed, right_bleed = _page_horizontal_bleeds(layout_mode, first_page_mode, page_number, bleed_inside, bleed_outside)
+			image_x, image_y = -left_bleed, -bleed_top
+			frame_width = page_width + left_bleed + right_bleed
+			frame_height = page_height + bleed_top + bleed_bottom
+		else:
+			available_width = page_width - margin_left - margin_right
+			available_height = page_height - margin_top - margin_bottom
+			frame_width, frame_height = _fit_contain_dimensions(image_width, image_height, available_width, available_height)
+			image_x = margin_left + (available_width - frame_width) / 2.0
+			image_y = margin_top + (available_height - frame_height) / 2.0
 	else:
 		content_rect = (margin_left, image_body_top, content_width, image_body_height)
 		left_bleed, right_bleed = _page_horizontal_bleeds(layout_mode, first_page_mode, page_number, bleed_inside, bleed_outside)
@@ -1182,6 +1214,45 @@ def _place_chapter_image(scribus, image_path, image_index, chapter_index, page_n
 		)
 	else:
 		_set_text_flow_mode_compat(scribus, image_frame)
+
+
+def _place_full_page_image(scribus, image_path, image_index, chapter_index, page_number, page_size, margins, layout_mode, first_page_mode, bleed_inside, bleed_outside, bleed_top, bleed_bottom, image_border_rgb, image_border_width_pt, layout_index, book_dir, page_roles):
+	print(f"placing full-page image {image_path.name} into page {page_number}")
+	page_roles[page_number] = "full_page_image"
+	page_width, page_height = _document_page_size_compat(scribus, page_size)
+	margin_top, margin_left, margin_right, margin_bottom = margins
+	image_instruction = _resolve_image_instruction(layout_index, book_dir, image_path)
+	image_border_rgb_used, image_border_width_pt_used = _resolve_border_override(
+		image_instruction,
+		image_border_rgb,
+		image_border_width_pt,
+	)
+
+	if image_instruction and image_instruction.get("bleed"):
+		left_bleed, right_bleed = _page_horizontal_bleeds(layout_mode, first_page_mode, page_number, bleed_inside, bleed_outside)
+		frame_x, frame_y = -left_bleed, -bleed_top
+		frame_width = page_width + left_bleed + right_bleed
+		frame_height = page_height + bleed_top + bleed_bottom
+	else:
+		source_width, source_height = _image_dimensions_compat(image_path)
+		available_width = page_width - margin_left - margin_right
+		available_height = page_height - margin_top - margin_bottom
+		frame_width, frame_height = _fit_contain_dimensions(source_width, source_height, available_width, available_height)
+		frame_x = margin_left + (available_width - frame_width) / 2.0
+		frame_y = margin_top + (available_height - frame_height) / 2.0
+
+	image_frame = _create_image_frame_compat(
+		scribus,
+		frame_x,
+		frame_y,
+		frame_width,
+		frame_height,
+		f"chapter_{chapter_index}_image_{image_index}",
+	)
+	_load_image_compat(scribus, image_path, image_frame)
+	_set_scale_image_to_frame_compat(scribus, image_frame)
+	_apply_image_frame_style_compat(scribus, image_frame, image_border_rgb_used, image_border_width_pt_used)
+	_set_text_flow_mode_compat(scribus, image_frame)
 
 
 def _place_gallery_pages(scribus, gallery_images, placed_count, chapter_index, current_page, page_size, margins, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, image_border_rgb, image_border_width_pt, image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside, gallery_columns, layout_index, book_dir, page_roles):
@@ -1429,6 +1500,33 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 			page_roles,
 			is_leftover=True,
 		)
+
+	single_gallery_page = len(gallery_images) == 1
+	if single_gallery_page:
+		current_page = _append_body_page_compat(scribus, current_page, "full_page_image", layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size, page_roles)
+		_goto_page_compat(scribus, current_page)
+		placed_count += 1
+		_place_full_page_image(
+			scribus,
+			gallery_images[0],
+			placed_count,
+			chapter_index,
+			current_page,
+			page_size,
+			margins,
+			layout_mode,
+			first_page_mode,
+			bleed_inside,
+			bleed_outside,
+			bleed_top,
+			bleed_bottom,
+			image_border_rgb,
+			image_border_width_pt,
+			layout_index,
+			book_dir,
+			page_roles,
+		)
+		gallery_images = []
 
 	current_page, placed_count = _place_gallery_pages(
 		scribus,
