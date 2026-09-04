@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"scribus-book-generator/internal/book"
+	"scribus-book-generator/internal/images"
 	"scribus-book-generator/internal/renderer"
 )
 
@@ -19,8 +20,9 @@ func run(args []string) int {
 	fs := flag.NewFlagSet("bookgen", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	verbose := fs.Bool("v", false, "print resolved configuration and chapter inventory")
+	convertHEIC := fs.Bool("convert-heic", false, "convert HEIC images in the book's chapter folders to JPG before layout")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: %s [-v] <book-dir>\n", filepath.Base(os.Args[0]))
+		fmt.Fprintf(os.Stderr, "usage: %s [-v] [--convert-heic] <book-dir>\n", filepath.Base(os.Args[0]))
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -32,6 +34,14 @@ func run(args []string) int {
 	}
 
 	bookDir := fs.Arg(0)
+	if *convertHEIC {
+		fmt.Printf("Converting HEIC images in %s\n", bookDir)
+		if err := images.ConvertHEIC(bookDir); err != nil {
+			fmt.Fprintf(os.Stderr, "bookgen: %v\n", err)
+			return 1
+		}
+	}
+
 	fmt.Printf("Loading book from %s\n", bookDir)
 	loaded, err := book.Load(bookDir)
 	if err != nil {

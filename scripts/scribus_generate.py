@@ -81,6 +81,40 @@ def _image_files(chapter_dir: Path):
 	return results
 
 
+def _parse_exif_orientation_ifd0(tiff_data):
+	if len(tiff_data) < 8 or tiff_data[0:2] not in (b"II", b"MM"):
+		return None
+	endian = "little" if tiff_data[0:2] == b"II" else "big"
+	ifd_offset = int.from_bytes(tiff_data[4:8], endian)
+	if ifd_offset + 2 > len(tiff_data):
+		return None
+	entry_count = int.from_bytes(tiff_data[ifd_offset:ifd_offset + 2], endian)
+	for entry_index in range(entry_count):
+		entry_offset = ifd_offset + 2 + entry_index * 12
+		if entry_offset + 12 > len(tiff_data):
+			break
+		tag = int.from_bytes(tiff_data[entry_offset:entry_offset + 2], endian)
+		if tag == 0x0112:
+			return int.from_bytes(tiff_data[entry_offset + 8:entry_offset + 10], endian)
+	return None
+
+
+def _jpeg_exif_orientation(data):
+	index = 2
+	while index + 4 <= len(data):
+		if data[index] != 0xFF:
+			index += 1
+			continue
+		marker = data[index + 1]
+		if marker == 0xDA:
+			return None
+		segment_length = int.from_bytes(data[index + 2:index + 4], "big")
+		if marker == 0xE1 and data[index + 4:index + 10] == b"Exif\x00\x00":
+			return _parse_exif_orientation_ifd0(data[index + 10:index + 2 + segment_length])
+		index += 2 + segment_length
+	return None
+
+
 def _image_dimensions_compat(image_path: Path):
 	try:
 		data = image_path.read_bytes()
@@ -101,6 +135,9 @@ def _image_dimensions_compat(image_path: Path):
 			if marker in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
 				height = int.from_bytes(data[index + 3:index + 5], "big")
 				width = int.from_bytes(data[index + 5:index + 7], "big")
+				# EXIF orientation 5-8 means the stored raster is rotated 90/270 from display orientation.
+				if _jpeg_exif_orientation(data) in (5, 6, 7, 8):
+					return height, width
 				return width, height
 			segment_length = int.from_bytes(data[index:index + 2], "big")
 			index += segment_length
@@ -880,6 +917,7 @@ def _append_body_page_compat(scribus, current_page, page_role, layout_mode, firs
 	_append_page_compat(scribus)
 	current_page += 1
 	page_roles[current_page] = page_role
+	print(f"creating new page ({current_page}) [{page_role}]")
 	_create_page_background_compat(scribus, current_page, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size)
 	return current_page
 
@@ -1009,7 +1047,9 @@ def _gallery_cell_rects(image_count, columns, content_x, content_y, content_widt
 	return rects
 
 
-def _place_chapter_image(scribus, image_path, image_index, chapter_index, page_number, page_size, margins, layout_mode, first_page_mode, bleed_inside, bleed_outside, bleed_top, bleed_bottom, image_body_top, image_body_height, image_border_rgb, image_border_width_pt, image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside, image_max_width, image_max_height, image_snap_to_edge, image_snap_target, image_allowed_edges, image_preferred_edges, image_edge_gap, layout_index, book_dir, page_roles):
+def _place_chapter_image(scribus, image_path, image_index, chapter_index, page_number, page_size, margins, layout_mode, first_page_mode, bleed_inside, bleed_outside, bleed_top, bleed_bottom, image_body_top, image_body_height, image_border_rgb, image_border_width_pt, image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside, image_max_width, image_max_height, image_snap_to_edge, image_snap_target, image_allowed_edges, image_preferred_edges, image_edge_gap, layout_index, book_dir, page_roles, is_leftover=False):
+	label = "leftover image" if is_leftover else "image"
+	print(f"placing {label} {image_path.name} into page {page_number}")
 	page_width, page_height = _document_page_size_compat(scribus, page_size)
 	margin_top, margin_left, margin_right, margin_bottom = margins
 	content_width = page_width - margin_left - margin_right
@@ -1167,6 +1207,7 @@ def _place_gallery_pages(scribus, gallery_images, placed_count, chapter_index, c
 		rects = _gallery_cell_rects(len(batch), columns, content_x, content_y, content_width, content_height, gap_x, gap_y)
 		for image_path, cell in zip(batch, rects):
 			placed_count += 1
+			print(f"placing leftover image {image_path.name} into page {current_page} (gallery slot {placed_count})")
 			cell_x, cell_y, cell_width, cell_height = cell
 			image_instruction = _resolve_image_instruction(layout_index, book_dir, image_path)
 			image_border_rgb_used, image_border_width_pt_used = _resolve_border_override(
@@ -1386,6 +1427,7 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 			layout_index,
 			book_dir,
 			page_roles,
+			is_leftover=True,
 		)
 
 	current_page, placed_count = _place_gallery_pages(
@@ -1544,6 +1586,7 @@ def main() -> int:
 		return 1
 
 	try:
+		print(f"creating new Scribus document ({len(chapters)} chapters)")
 		_new_document_compat(
 			scribus,
 			page_size,
@@ -1553,6 +1596,7 @@ def main() -> int:
 			page_size_constant,
 		)
 		_ensure_chapter_heading_styles_compat(scribus, chapter_heading_font_name, chapter_heading_font_size_pt, chapter_heading_color_rgb)
+		print("creating new page (1) [chapter_opening]")
 		_create_page_background_compat(scribus, 1, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size)
 		title = chapters[0][0] or book_dir.name
 		if hasattr(scribus, "setDocTitle"):
@@ -1562,6 +1606,7 @@ def main() -> int:
 		page_roles = {1: "chapter_opening"}
 		for index, chapter_data in enumerate(chapters, start=1):
 			chapter_title, chapter_body, chapter_images = chapter_data
+			print(f"rendering chapter {index}/{len(chapters)}: '{chapter_title}' ({len(chapter_images)} images)")
 			if index > 1:
 				current_page = _start_chapter_on_right_page_compat(scribus, current_page, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size, page_roles)
 				_goto_page_compat(scribus, current_page)
@@ -1605,6 +1650,7 @@ def main() -> int:
 				page_roles,
 			)
 
+		print(f"rendering page numbers across {current_page} pages")
 		_render_page_numbers_compat(
 			scribus,
 			current_page,
@@ -1629,9 +1675,11 @@ def main() -> int:
 		)
 
 		_goto_page_compat(scribus, 1)
+		print(f"saving Scribus document to {sla_path}")
 		_save_document_compat(scribus, sla_path)
 
 		if hasattr(scribus, "PDFfile"):
+			print(f"exporting PDF to {pdf_path}")
 			pdf = scribus.PDFfile()
 			pdf.file = str(pdf_path)
 			pdf.save()

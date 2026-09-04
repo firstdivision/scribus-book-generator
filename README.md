@@ -81,6 +81,20 @@ The command loads and validates the book folder (`book.yaml`, `layout.json`, cha
 go run ./cmd/bookgen -v books/sample-book/
 ```
 
+### Converting HEIC Images
+
+Chapter images in HEIC/HEIF format are not placed by the generator. Pass `--convert-heic` to run `scripts/convert-heic.sh` over the book's `chapters/` tree before the book is loaded, so every `*.heic`/`*.heif` file gets a sibling `.jpg` that is picked up as a chapter image. The original HEIC files are left in place and existing `.jpg` files are not overwritten.
+
+```bash
+go run ./cmd/bookgen --convert-heic books/sample-book/
+```
+
+The script requires either `heif-convert` (Debian/Ubuntu package `libheif-examples`) or ImageMagick (`magick`/`convert`) with HEIC support. It can also be run on its own:
+
+```bash
+./scripts/convert-heic.sh books/sample-book/ [--quality N] [--force]
+```
+
 ## Creating A Template
 
 Templates are YAML files stored under `templates/`. A book selects one template by filename.
