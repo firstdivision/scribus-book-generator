@@ -1035,13 +1035,23 @@ def _gallery_page_geometry(columns, content_width, content_height, gap_x, gap_y)
 	return columns, rows, cell_width, cell_height
 
 
+def _gallery_balanced_columns(image_count):
+	"""Return the column count for the most square-like grid holding image_count cells."""
+	count = max(1, int(image_count))
+	root = int(count ** 0.5)
+	for rows in range(root, 0, -1):
+		if count % rows == 0:
+			return count // rows
+	return count
+
+
 def _gallery_effective_columns(image_count, configured_columns):
 	configured_columns = max(1, int(configured_columns))
 	image_count = max(0, int(image_count))
 	if image_count <= 0:
 		return configured_columns
 	if image_count <= configured_columns:
-		return image_count
+		return _gallery_balanced_columns(image_count)
 	remainder = image_count % configured_columns
 	if remainder == 0:
 		return configured_columns
@@ -1051,12 +1061,27 @@ def _gallery_effective_columns(image_count, configured_columns):
 	return configured_columns
 
 
+def _gallery_fitted_geometry(image_count, columns, content_width, content_height, gap_x, gap_y):
+	"""Size cells for the grid so every row fits inside the content area."""
+	columns = max(1, int(columns))
+	rows = max(1, (max(1, int(image_count)) + columns - 1) // columns)
+	cell_width = (content_width - gap_x * (columns - 1)) / float(columns)
+	height_limit = (content_height - gap_y * (rows - 1)) / float(rows)
+	return columns, rows, max(1.0, cell_width), max(1.0, min(cell_width, height_limit))
+
+
 def _gallery_cell_rects(image_count, columns, content_x, content_y, content_width, content_height, gap_x, gap_y):
-	columns = _gallery_effective_columns(image_count, columns)
-	columns, _rows, cell_width, cell_height = _gallery_page_geometry(columns, content_width, content_height, gap_x, gap_y)
 	image_count = max(0, int(image_count))
 	if image_count == 0:
 		return []
+
+	configured_columns = max(1, int(columns))
+	columns = _gallery_effective_columns(image_count, configured_columns)
+	columns, rows, cell_width, cell_height = _gallery_fitted_geometry(image_count, columns, content_width, content_height, gap_x, gap_y)
+	if rows > 1 and image_count <= configured_columns:
+		_, _, single_width, single_height = _gallery_fitted_geometry(image_count, image_count, content_width, content_height, gap_x, gap_y)
+		if min(cell_width, cell_height) < min(single_width, single_height):
+			columns, rows, cell_width, cell_height = _gallery_fitted_geometry(image_count, image_count, content_width, content_height, gap_x, gap_y)
 
 	actual_rows = (image_count + columns - 1) // columns
 	total_height = actual_rows * cell_height + max(0, actual_rows - 1) * gap_y

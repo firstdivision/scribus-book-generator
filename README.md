@@ -335,7 +335,7 @@ Text wrap spacing remains separate from edge snap.
 
 - `gallery_columns`: maximum columns in the end-of-chapter leftover gallery (`>= 1`, default `2`)
 
-Gallery pages fill the content area (margins), not bleed. Spacing between cells comes from `images.spacing_mm`. When a page holds fewer images than `gallery_columns`, the grid collapses to the image count so the row stays centered with equal blank space on all sides; a lone image is promoted to a dedicated full-page (no bleed) page instead of a gallery cell.
+Gallery pages fill the content area (margins), not bleed. Spacing between cells comes from `images.spacing_mm`. When a page holds fewer images than `gallery_columns`, the grid collapses to the image count so the row stays centered with equal blank space on all sides; a lone image is promoted to a dedicated full-page (no bleed) page instead of a gallery cell. A single row that can form a more square grid is converted automatically (4 → 2x2, 6 → 2x3, 9 → 3x3) whenever the square grid does not shrink the cells.
 
 ### `layout.json`
 
@@ -373,7 +373,7 @@ In-flow images are placed one per page only while body text still overflows. Aft
 - a single remaining leftover is treated as `full_page` without bleed (contain-fit and centered inside the margins)
 - remaining leftovers pack into an end-of-chapter gallery (page role `chapter_gallery`)
 
-If every leftover is full-page, there is no gallery. Gallery pages center the occupied cells vertically and horizontally: the last page may hold a short row, and the grid adapts its column count so the row is centered rather than stretched.
+If every leftover is full-page, there is no gallery. Gallery pages center the occupied cells vertically and horizontally: the last page may hold a short row, and the grid adapts its column count so the row is centered rather than stretched. Single-row results that factor into a square-like grid (2x2, 2x3, 3x3, …) are converted automatically; on height-constrained pages the single row is kept when it would yield larger cells.
 
 ### `page_numbers`
 

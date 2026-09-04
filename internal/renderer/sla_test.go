@@ -73,7 +73,9 @@ func TestCommittedScribusScriptContainsRendererHelpers(t *testing.T) {
 		"leftover_full_page = []",
 		"gallery_images = []",
 		"def _gallery_effective_columns",
-		"columns = _gallery_effective_columns(image_count, columns)",
+		"columns = _gallery_effective_columns(image_count, configured_columns)",
+		"def _gallery_balanced_columns",
+		"def _gallery_fitted_geometry",
 		"def _place_full_page_image",
 		"single_gallery_page = len(gallery_images) == 1",
 		"current_page, placed_count = _place_gallery_pages(",
@@ -345,14 +347,22 @@ print(json.dumps({"four": four_in_four, "two": two_in_four}))`, committedScriptP
 		t.Fatalf("decode gallery output %q: %v", output, err)
 	}
 
-	// 4 images in 4 columns: single row of height 92.5 centered in content_height=300 (top margin 20).
-	// offset_y = (300 - 92.5) / 2 = 103.75 -> y = 20 + 103.75 = 123.75
-	if len(parsed.Four) != 4 {
-		t.Fatalf("expected 4 rects, got %d", len(parsed.Four))
+	// 4 images in 4 columns: converted to a 2x2 square grid.
+	// cell_width = (400 - 10) / 2 = 195; cell_height = min(195, (300 - 10) / 2) = 145.
+	// total height 2*145 + 10 = 300 fills the content area -> rows at y=20 and y=175.
+	wantFour := [][]float64{
+		{10, 20, 195, 145},
+		{215, 20, 195, 145},
+		{10, 175, 195, 145},
+		{215, 175, 195, 145},
 	}
-	for i, r := range parsed.Four {
-		if r[1] != 123.75 {
-			t.Fatalf("rect %d expected y=123.75 (vertically centered), got %f", i, r[1])
+	if len(parsed.Four) != len(wantFour) {
+		t.Fatalf("expected %d rects, got %d", len(wantFour), len(parsed.Four))
+	}
+	for i, want := range wantFour {
+		got := parsed.Four[i]
+		if got[0] != want[0] || got[1] != want[1] || got[2] != want[2] || got[3] != want[3] {
+			t.Fatalf("rect %d: expected %v, got %v", i, want, got)
 		}
 	}
 
@@ -388,6 +398,10 @@ cases = [
     (6, 4),
     (7, 4),
     (9, 4),
+    (6, 6),
+    (8, 8),
+    (9, 9),
+    (12, 12),
 ]
 print(json.dumps([module._gallery_effective_columns(count, columns) for count, columns in cases]))`, committedScriptPath(t))
 	output, err := cmd.CombinedOutput()
@@ -398,13 +412,44 @@ print(json.dumps([module._gallery_effective_columns(count, columns) for count, c
 	if err := json.Unmarshal(output, &got); err != nil {
 		t.Fatalf("decode gallery output %q: %v", output, err)
 	}
-	want := []int{1, 2, 3, 4, 4, 5, 3, 4, 3}
+	want := []int{1, 2, 3, 2, 4, 5, 3, 4, 3, 3, 4, 3, 4}
 	if len(got) != len(want) {
 		t.Fatalf("expected %d results, got %d", len(want), len(got))
 	}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("case %d: expected %d effective columns, got %d", i, want[i], got[i])
+		}
+	}
+}
+
+func TestScribusScriptGallerySquareConversionSkipsShortPages(t *testing.T) {
+	cmd := exec.Command("python3", "-c", `import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("scribus_generate", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+print(json.dumps(module._gallery_cell_rects(9, 9, 0, 0, 400, 60, 10, 10)))`, committedScriptPath(t))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to execute gallery helper: %v\n%s", err, output)
+	}
+	var rects [][]float64
+	if err := json.Unmarshal(output, &rects); err != nil {
+		t.Fatalf("decode gallery output %q: %v", output, err)
+	}
+
+	// A 3x3 grid would shrink cells to (60 - 20) / 3 = 13.33 high, so the
+	// height-constrained page must keep the single row of 9 instead.
+	if len(rects) != 9 {
+		t.Fatalf("expected 9 rects, got %d", len(rects))
+	}
+	wantCell := 320.0 / 9.0
+	for i, r := range rects {
+		if r[1] != rects[0][1] {
+			t.Fatalf("rect %d: expected a single row, got y=%f vs first y=%f", i, r[1], rects[0][1])
+		}
+		if r[2] != wantCell || r[3] != wantCell {
+			t.Fatalf("rect %d: expected single-row cell %f, got %v", i, wantCell, r)
 		}
 	}
 }
