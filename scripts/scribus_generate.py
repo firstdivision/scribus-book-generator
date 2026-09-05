@@ -337,6 +337,21 @@ def _fit_contain_dimensions(source_width, source_height, max_width, max_height):
 	return float(source_width) * scale, float(source_height) * scale
 
 
+def _fit_cover_rect(source_width, source_height, box_x, box_y, box_width, box_height):
+	"""Frame that covers the box with the source aspect ratio; the overflow is cropped by the page/bleed box."""
+	if source_width <= 0 or source_height <= 0 or box_width <= 0 or box_height <= 0:
+		return box_x, box_y, box_width, box_height
+	scale = max(box_width / float(source_width), box_height / float(source_height))
+	frame_width = float(source_width) * scale
+	frame_height = float(source_height) * scale
+	return (
+		box_x + (box_width - frame_width) / 2.0,
+		box_y + (box_height - frame_height) / 2.0,
+		frame_width,
+		frame_height,
+	)
+
+
 def _resolve_wrap_spacing(is_right_page, spacing_inside, spacing_outside, spacing_top, spacing_bottom):
 	if is_right_page:
 		return spacing_inside, spacing_outside, spacing_top, spacing_bottom
@@ -1131,9 +1146,14 @@ def _place_chapter_image(scribus, image_path, image_index, chapter_index, page_n
 		page_roles[page_number] = "full_page_image"
 		if image_instruction and image_instruction.get("bleed"):
 			left_bleed, right_bleed = _page_horizontal_bleeds(layout_mode, first_page_mode, page_number, bleed_inside, bleed_outside)
-			image_x, image_y = -left_bleed, -bleed_top
-			frame_width = page_width + left_bleed + right_bleed
-			frame_height = page_height + bleed_top + bleed_bottom
+			image_x, image_y, frame_width, frame_height = _fit_cover_rect(
+				image_width,
+				image_height,
+				-left_bleed,
+				-bleed_top,
+				page_width + left_bleed + right_bleed,
+				page_height + bleed_top + bleed_bottom,
+			)
 		else:
 			available_width = page_width - margin_left - margin_right
 			available_height = page_height - margin_top - margin_bottom
@@ -1253,13 +1273,19 @@ def _place_full_page_image(scribus, image_path, image_index, chapter_index, page
 		image_border_width_pt,
 	)
 
+	source_width, source_height = _image_dimensions_compat(image_path)
+
 	if image_instruction and image_instruction.get("bleed"):
 		left_bleed, right_bleed = _page_horizontal_bleeds(layout_mode, first_page_mode, page_number, bleed_inside, bleed_outside)
-		frame_x, frame_y = -left_bleed, -bleed_top
-		frame_width = page_width + left_bleed + right_bleed
-		frame_height = page_height + bleed_top + bleed_bottom
+		frame_x, frame_y, frame_width, frame_height = _fit_cover_rect(
+			source_width,
+			source_height,
+			-left_bleed,
+			-bleed_top,
+			page_width + left_bleed + right_bleed,
+			page_height + bleed_top + bleed_bottom,
+		)
 	else:
-		source_width, source_height = _image_dimensions_compat(image_path)
 		available_width = page_width - margin_left - margin_right
 		available_height = page_height - margin_top - margin_bottom
 		frame_width, frame_height = _fit_contain_dimensions(source_width, source_height, available_width, available_height)
