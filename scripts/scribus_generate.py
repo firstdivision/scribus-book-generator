@@ -599,6 +599,15 @@ def _page_horizontal_bleeds(layout_mode, first_page_mode, page_number, bleed_ins
 	return bleed_outside, bleed_inside
 
 
+def _full_page_bleed_rect(layout_mode, first_page_mode, page_number, page_width, page_height, bleed_inside, bleed_outside, bleed_top, bleed_bottom):
+	"""Return a bleed box whose inside edge stops exactly at the spine."""
+	if layout_mode != "facing_pages":
+		return -bleed_outside, -bleed_top, page_width + 2.0 * bleed_outside, page_height + bleed_top + bleed_bottom
+	if _page_is_right_compat(layout_mode, first_page_mode, page_number):
+		return 0.0, -bleed_top, page_width + bleed_outside, page_height + bleed_top + bleed_bottom
+	return -bleed_outside, -bleed_top, page_width + bleed_outside, page_height + bleed_top + bleed_bottom
+
+
 def _create_page_background_compat(scribus, page_number, layout_mode, first_page_mode, background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, fallback_page_size):
 	if background_rgb is None:
 		return
@@ -1155,14 +1164,9 @@ def _place_chapter_image(scribus, image_path, image_index, chapter_index, page_n
 	if is_full_page:
 		page_roles[page_number] = "full_page_image"
 		if image_instruction and image_instruction.get("bleed"):
-			left_bleed, right_bleed = _page_horizontal_bleeds(layout_mode, first_page_mode, page_number, bleed_inside, bleed_outside)
-			image_x, image_y, frame_width, frame_height = _fit_cover_rect(
-				image_width,
-				image_height,
-				-left_bleed,
-				-bleed_top,
-				page_width + left_bleed + right_bleed,
-				page_height + bleed_top + bleed_bottom,
+			image_x, image_y, frame_width, frame_height = _full_page_bleed_rect(
+				layout_mode, first_page_mode, page_number, page_width, page_height,
+				bleed_inside, bleed_outside, bleed_top, bleed_bottom,
 			)
 		else:
 			available_width = page_width - margin_left - margin_right
@@ -1286,14 +1290,9 @@ def _place_full_page_image(scribus, image_path, image_index, chapter_index, page
 	source_width, source_height = _image_dimensions_compat(image_path)
 
 	if image_instruction and image_instruction.get("bleed"):
-		left_bleed, right_bleed = _page_horizontal_bleeds(layout_mode, first_page_mode, page_number, bleed_inside, bleed_outside)
-		frame_x, frame_y, frame_width, frame_height = _fit_cover_rect(
-			source_width,
-			source_height,
-			-left_bleed,
-			-bleed_top,
-			page_width + left_bleed + right_bleed,
-			page_height + bleed_top + bleed_bottom,
+		frame_x, frame_y, frame_width, frame_height = _full_page_bleed_rect(
+			layout_mode, first_page_mode, page_number, page_width, page_height,
+			bleed_inside, bleed_outside, bleed_top, bleed_bottom,
 		)
 	else:
 		available_width = page_width - margin_left - margin_right

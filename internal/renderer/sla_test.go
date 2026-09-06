@@ -287,6 +287,33 @@ print(json.dumps(names))`, committedScriptPath(t))
 	}
 }
 
+func TestScribusScriptFullPageBleedStopsAtSpine(t *testing.T) {
+	cmd := exec.Command("python3", "-c", `import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("scribus_generate", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+left = module._full_page_bleed_rect("facing_pages", "right", 2, 800, 600, 12, 18, 9, 10)
+right = module._full_page_bleed_rect("facing_pages", "right", 3, 800, 600, 12, 18, 9, 10)
+print(json.dumps({"left": left, "right": right}))`, committedScriptPath(t))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to execute full-page bleed helper: %v\n%s", err, output)
+	}
+	var parsed struct {
+		Left  []float64 `json:"left"`
+		Right []float64 `json:"right"`
+	}
+	if err := json.Unmarshal(output, &parsed); err != nil {
+		t.Fatalf("decode full-page bleed output %q: %v", output, err)
+	}
+	if len(parsed.Left) != 4 || parsed.Left[0] != -18 || parsed.Left[2] != 818 {
+		t.Fatalf("left page must bleed outside but end at its right-hand spine, got %v", parsed.Left)
+	}
+	if len(parsed.Right) != 4 || parsed.Right[0] != 0 || parsed.Right[2] != 818 {
+		t.Fatalf("right page must start at its left-hand spine and bleed outside, got %v", parsed.Right)
+	}
+}
+
 func TestScribusScriptGalleryCellRectsDoNotStretchShortRow(t *testing.T) {
 	cmd := exec.Command("python3", "-c", `import importlib.util, json, sys
 spec = importlib.util.spec_from_file_location("scribus_generate", sys.argv[1])
