@@ -45,6 +45,12 @@ chapter_headings:
     style: Demi
     size_pt: 28
   color_rgb: [40, 40, 40]
+  background_color_rgb: [240, 230, 220]
+  borders:
+    bottom: {color_rgb: [1, 2, 3], width_pt: 2}
+    left: {}
+    top: null
+    right: {width_pt: 0}
   alignment: left
   spacing_mm:
     top: 20
@@ -135,6 +141,18 @@ page_numbers:
 	}
 	if cfg.PageNumbers.OffsetMM.Top != 7 || cfg.PageNumbers.OffsetMM.Bottom != 7 || cfg.PageNumbers.OffsetMM.Inside != 10 || cfg.PageNumbers.OffsetMM.Outside != 10 {
 		t.Fatalf("unexpected page number offsets: %+v", cfg.PageNumbers.OffsetMM)
+	}
+	if cfg.ChapterHeadings.BackgroundColorRGB == nil || *cfg.ChapterHeadings.BackgroundColorRGB != [3]int{240, 230, 220} {
+		t.Fatalf("unexpected heading background: %v", cfg.ChapterHeadings.BackgroundColorRGB)
+	}
+	if b := cfg.ChapterHeadings.Borders["bottom"]; b.ColorRGB != [3]int{1, 2, 3} || b.WidthPt != 2 {
+		t.Fatalf("unexpected bottom border: %+v", b)
+	}
+	if b := cfg.ChapterHeadings.Borders["left"]; b.ColorRGB != cfg.ChapterHeadings.ColorRGB || b.WidthPt != 1 {
+		t.Fatalf("unexpected default border: %+v", b)
+	}
+	if cfg.ChapterHeadings.Borders["top"].WidthPt != 0 || cfg.ChapterHeadings.Borders["right"].WidthPt != 0 {
+		t.Fatal("disabled borders must have zero width")
 	}
 	if cfg.ChapterHeadings.Font.Family != "URW Bookman" || cfg.ChapterHeadings.Font.Style != "Demi" || cfg.ChapterHeadings.Font.SizePt != 28 {
 		t.Fatalf("unexpected chapter heading font: %+v", cfg.ChapterHeadings.Font)
@@ -298,6 +316,14 @@ func TestLoadForBookRejectsInvalidChapterHeadingConfig(t *testing.T) {
 		config  string
 		wantErr string
 	}{
+		{name: "short background", config: "background_color_rgb: [1, 2]\n", wantErr: "background_color_rgb"},
+		{name: "bad background", config: "background_color_rgb: [1, -1, 2]\n", wantErr: "background_color_rgb"},
+		{name: "unknown side", config: "borders: {outside: {}}\n", wantErr: "unsupported side"},
+		{name: "short border color", config: "borders: {top: {color_rgb: []}}\n", wantErr: "exactly 3"},
+		{name: "bad border color", config: "borders: {left: {color_rgb: [256, 0, 0]}}\n", wantErr: "between 0 and 255"},
+		{name: "negative border", config: "borders: {bottom: {width_pt: -1}}\n", wantErr: "width_pt"},
+		{name: "nan border", config: "borders: {right: {width_pt: .nan}}\n", wantErr: "width_pt"},
+		{name: "infinite border", config: "borders: {top: {width_pt: .inf}}\n", wantErr: "width_pt"},
 		{name: "empty family", config: "font:\n  family: ''\n", wantErr: "font.family"},
 		{name: "empty style", config: "font:\n  style: ' '\n", wantErr: "font.style"},
 		{name: "zero size", config: "font:\n  size_pt: 0\n", wantErr: "font.size_pt"},

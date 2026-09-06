@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"scribus-book-generator/internal/config"
+	"scribus-book-generator/internal/images"
 	"scribus-book-generator/internal/layout/layoutplan"
 	"scribus-book-generator/internal/markdown"
 )
@@ -49,7 +50,7 @@ func Load(bookDir string) (Book, error) {
 		return Book{}, fmt.Errorf("load layout.json: %w", err)
 	}
 
-	chapters, err := loadChapters(bookDir)
+	chapters, err := loadChapters(bookDir, cfg.Images.Sorting)
 	if err != nil {
 		return Book{}, err
 	}
@@ -66,7 +67,7 @@ func Load(bookDir string) (Book, error) {
 	}, nil
 }
 
-func loadChapters(bookDir string) ([]Chapter, error) {
+func loadChapters(bookDir string, sorting config.ImageSorting) ([]Chapter, error) {
 	chaptersDir := filepath.Join(bookDir, "chapters")
 	entries, err := os.ReadDir(chaptersDir)
 	if err != nil {
@@ -89,7 +90,7 @@ func loadChapters(bookDir string) ([]Chapter, error) {
 
 	chapters := make([]Chapter, 0, len(dirs))
 	for _, entry := range dirs {
-		chapter, err := loadChapter(bookDir, entry.Name())
+		chapter, err := loadChapter(bookDir, entry.Name(), sorting)
 		if err != nil {
 			return nil, err
 		}
@@ -98,7 +99,7 @@ func loadChapters(bookDir string) ([]Chapter, error) {
 	return chapters, nil
 }
 
-func loadChapter(bookDir, name string) (Chapter, error) {
+func loadChapter(bookDir, name string, sorting config.ImageSorting) (Chapter, error) {
 	chapterDir := filepath.Join(bookDir, "chapters", name)
 	markdownPath, err := firstMarkdownFile(chapterDir)
 	if err != nil {
@@ -111,7 +112,7 @@ func loadChapter(bookDir, name string) (Chapter, error) {
 		return Chapter{}, fmt.Errorf("%s: %w", rel, err)
 	}
 
-	images, err := imageFiles(chapterDir)
+	images, err := imageFiles(chapterDir, sorting)
 	if err != nil {
 		return Chapter{}, fmt.Errorf("chapter %s: %w", name, err)
 	}
@@ -159,7 +160,7 @@ func firstMarkdownFile(chapterDir string) (string, error) {
 	return filepath.Join(chapterDir, names[0]), nil
 }
 
-func imageFiles(chapterDir string) ([]string, error) {
+func imageFiles(chapterDir string, sorting config.ImageSorting) ([]string, error) {
 	entries, err := os.ReadDir(chapterDir)
 	if err != nil {
 		return nil, err
@@ -189,6 +190,13 @@ func imageFiles(chapterDir string) ([]string, error) {
 			seen[path] = true
 			results = append(results, path)
 		}
+	}
+
+	switch sorting {
+	case config.ImageSortingDateAscending:
+		results = images.SortByCaptureDate(results, false)
+	case config.ImageSortingDateDescending:
+		results = images.SortByCaptureDate(results, true)
 	}
 	return results, nil
 }

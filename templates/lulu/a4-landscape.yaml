@@ -6,7 +6,7 @@ document:
 page:
   size: A4
   orientation: landscape
-  background_color_rgb: [245, 235, 220]
+  background_color_rgb: [239, 226, 205]
 
 bleed:
   top: 3.18
@@ -27,6 +27,13 @@ chapter_headings:
     size_pt: 28
 
   color_rgb: [40, 40, 40]
+  # Optional title-frame fill and independent solid borders.
+  background_color_rgb: [245, 235, 220]
+  borders:
+    bottom: {color_rgb: [40, 40, 40], width_pt: 1}
+  #   left: {color_rgb: [40, 40, 40], width_pt: 1}
+  #   top: {color_rgb: [40, 40, 40], width_pt: 1}
+  #   right: {color_rgb: [40, 40, 40], width_pt: 1}
   alignment: left
 
   spacing_mm:
@@ -34,6 +41,7 @@ chapter_headings:
     bottom: 10
 
 images:
+  sorting: date-ascending
   border:
     color_rgb: [255, 255, 255]
     width_pt: 11
@@ -45,8 +53,8 @@ images:
     outside: 5
     
   sizing:
-    max_width_mm: 110
-    max_height_mm: 100
+    max_width_mm: 120
+    max_height_mm: 120
 
   placement:
     snap_to_edge: true
@@ -58,10 +66,15 @@ images:
       - bottom
     preferred_edges:
       - outside
+      - inside
       - top
+      - bottom
+
+    edge_selection: random
+
     edge_gap_mm: 0
   leftovers:
-    gallery_columns: 4
+    gallery_columns: 3
 
 page_numbers:
   enabled: true

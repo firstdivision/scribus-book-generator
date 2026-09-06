@@ -57,8 +57,15 @@ type bookConfigFile struct {
 	Template string `yaml:"template"`
 }
 
+type chapterHeadingBorderConfig struct {
+	ColorRGB []int    `yaml:"color_rgb"`
+	WidthPt  *float64 `yaml:"width_pt"`
+}
+
 type chapterHeadingTemplateConfig struct {
-	Font struct {
+	BackgroundColorRGB []int                                  `yaml:"background_color_rgb"`
+	Borders            map[string]*chapterHeadingBorderConfig `yaml:"borders"`
+	Font               struct {
 		Family *string  `yaml:"family"`
 		Style  *string  `yaml:"style"`
 		SizePt *float64 `yaml:"size_pt"`
@@ -237,6 +244,32 @@ func parseChapterHeadingSettings(raw *chapterHeadingTemplateConfig, defaults cha
 			return settings, fmt.Errorf("chapter_headings.color_rgb must contain exactly 3 integers")
 		}
 		settings.ColorRGB = [3]int{raw.ColorRGB[0], raw.ColorRGB[1], raw.ColorRGB[2]}
+	}
+	if raw.BackgroundColorRGB != nil {
+		if len(raw.BackgroundColorRGB) != 3 {
+			return settings, fmt.Errorf("chapter_headings.background_color_rgb must contain exactly 3 integers")
+		}
+		settings.BackgroundColorRGB = &[3]int{raw.BackgroundColorRGB[0], raw.BackgroundColorRGB[1], raw.BackgroundColorRGB[2]}
+	}
+	if raw.Borders != nil {
+		settings.Borders = make(map[string]chapterheadings.Border, len(raw.Borders))
+		for side, value := range raw.Borders {
+			border := chapterheadings.Border{ColorRGB: settings.ColorRGB, WidthPt: 1}
+			if value == nil {
+				border.WidthPt = 0
+			} else {
+				if value.WidthPt != nil {
+					border.WidthPt = *value.WidthPt
+				}
+				if value.ColorRGB != nil {
+					if len(value.ColorRGB) != 3 {
+						return settings, fmt.Errorf("chapter_headings.borders.%s.color_rgb must contain exactly 3 integers", side)
+					}
+					border.ColorRGB = [3]int{value.ColorRGB[0], value.ColorRGB[1], value.ColorRGB[2]}
+				}
+			}
+			settings.Borders[side] = border
+		}
 	}
 	if raw.Alignment != nil {
 		settings.Alignment = chapterheadings.Alignment(strings.TrimSpace(*raw.Alignment))

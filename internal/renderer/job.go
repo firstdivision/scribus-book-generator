@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"scribus-book-generator/internal/config"
+	"scribus-book-generator/internal/layout/chapterheadings"
 	"scribus-book-generator/internal/layout/layoutplan"
 )
 
@@ -72,11 +73,13 @@ type scribusJobPageNumbers struct {
 // scribusJobChapterHeadings is the reusable chapter-title paragraph style and
 // the extra space above/below the title frame (not blank lines in the text).
 type scribusJobChapterHeadings struct {
-	FontName      string            `json:"font_name"`
-	FontSizePt    float64           `json:"font_size_pt"`
-	ColorRGB      [3]int            `json:"color_rgb"`
-	Alignment     string            `json:"alignment"`
-	SpacingPoints scribusJobSpacing `json:"spacing_points"`
+	BackgroundColorRGB *[3]int                           `json:"background_color_rgb"`
+	Borders            map[string]chapterheadings.Border `json:"borders"`
+	FontName           string                            `json:"font_name"`
+	FontSizePt         float64                           `json:"font_size_pt"`
+	ColorRGB           [3]int                            `json:"color_rgb"`
+	Alignment          string                            `json:"alignment"`
+	SpacingPoints      scribusJobSpacing                 `json:"spacing_points"`
 }
 
 // scribusJobImages is template defaults for frames: border, wrap inset, contain
@@ -91,6 +94,7 @@ type scribusJobImages struct {
 	SnapTarget      string          `json:"snap_target"`
 	AllowedEdges    []string        `json:"allowed_edges"`
 	PreferredEdges  []string        `json:"preferred_edges"`
+	EdgeSelection   string          `json:"edge_selection"`
 	EdgeGapPoints   float64         `json:"edge_gap_points"`
 	GalleryColumns  int             `json:"gallery_columns"`
 }
@@ -137,10 +141,12 @@ func buildScribusJob(cfg config.Config, plan layoutplan.Plan) scribusJob {
 			HideOn: hideOn,
 		},
 		ChapterHeadings: scribusJobChapterHeadings{
-			FontName:   scribusFontName(cfg.ChapterHeadings.Font.Family, cfg.ChapterHeadings.Font.Style),
-			FontSizePt: cfg.ChapterHeadings.Font.SizePt,
-			ColorRGB:   cfg.ChapterHeadings.ColorRGB,
-			Alignment:  string(cfg.ChapterHeadings.Alignment),
+			BackgroundColorRGB: cfg.ChapterHeadings.BackgroundColorRGB,
+			Borders:            cfg.ChapterHeadings.Borders,
+			FontName:           scribusFontName(cfg.ChapterHeadings.Font.Family, cfg.ChapterHeadings.Font.Style),
+			FontSizePt:         cfg.ChapterHeadings.Font.SizePt,
+			ColorRGB:           cfg.ChapterHeadings.ColorRGB,
+			Alignment:          string(cfg.ChapterHeadings.Alignment),
 			SpacingPoints: scribusJobSpacing{
 				Top:    mmToPoints(cfg.ChapterHeadings.SpacingMM.Top),
 				Bottom: mmToPoints(cfg.ChapterHeadings.SpacingMM.Bottom),
@@ -161,6 +167,7 @@ func buildScribusJob(cfg config.Config, plan layoutplan.Plan) scribusJob {
 			SnapTarget:      string(cfg.Images.Placement.SnapTarget),
 			AllowedEdges:    imageEdges(cfg.Images.Placement.AllowedEdges),
 			PreferredEdges:  imageEdges(cfg.Images.Placement.Preferred),
+			EdgeSelection:   string(cfg.Images.Placement.Selection),
 			EdgeGapPoints:   mmToPoints(cfg.Images.Placement.EdgeGapMM),
 			GalleryColumns:  cfg.Images.Leftovers.GalleryColumns,
 		},

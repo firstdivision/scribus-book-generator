@@ -158,6 +158,8 @@ chapter_headings:
 		bottom: 10
 
 images:
+	sorting: none
+
 	border:
 		color_rgb: [255, 255, 255]
 		width_pt: 3
@@ -183,6 +185,7 @@ images:
 		preferred_edges:
 			- outside
 			- top
+		edge_selection: preferred
 		edge_gap_mm: 0
 
 	leftovers:
@@ -274,6 +277,24 @@ The renderer combines `family` and `style` into an exact Scribus font name, such
 - Must contain exactly three integers from `0` through `255`
 - A named Scribus color is created once and reused by the chapter-heading style
 
+#### `chapter_headings.background_color_rgb` and `chapter_headings.borders`
+
+`background_color_rgb` fills the entire chapter-title text frame (the content width, not just the text). Supply exactly three integers from `0` through `255`; omitted or `null` means no fill.
+
+`borders` accepts physical `top`, `bottom`, `left`, and `right` sides independently. Each side accepts `color_rgb` (exactly three integers from `0` through `255`, defaults to the heading text color) and `width_pt` (finite and `>= 0`, defaults to `1`). Omitted sides, `null` sides, and zero widths draw no border. Unknown sides are rejected.
+
+```yaml
+chapter_headings:
+  background_color_rgb: [240, 230, 220]
+  borders:
+    bottom: {color_rgb: [40, 40, 40], width_pt: 2}
+    left: {color_rgb: [120, 80, 40], width_pt: 1}
+    top: {width_pt: 1}
+    right: {width_pt: 0}
+```
+
+Borders are solid, separately editable rectangles inside the title-frame edges, drawn in top, bottom, left, right order. Their thickness is capped at the frame dimension. They do not add text padding or change heading spacing; thick borders can overlap title text. Backgrounds and borders are disabled by default.
+
 #### `chapter_headings.alignment`
 
 Valid values:
@@ -300,6 +321,14 @@ The renderer applies these values through text-frame geometry rather than insert
 
 Controls image frame styling and the text wrap spacing around image frames.
 
+#### `images.sorting`
+
+- `none` (default): chapter images are ordered by file extension group, then file name
+- `date-ascending`: oldest capture date first
+- `date-descending`: newest capture date first
+
+Date sorting reads the EXIF capture timestamp (`DateTimeOriginal`, falling back to `DateTimeDigitized` then `DateTime`) from JPEG files. It is best effort: files with no readable camera timestamp — including formats without EXIF, or files whose metadata was stripped — are moved to the end of the chapter and ordered by file name.
+
 #### `images.border`
 
 - `color_rgb`: `[r, g, b]`
@@ -322,6 +351,7 @@ Sizing is contain-fit by default and always preserves source aspect ratio.
 - `snap_target`: `content_area`, `trim`, or `bleed`
 - `allowed_edges`: list of `outside`, `inside`, `top`, `bottom`
 - `preferred_edges`: ordered subset of `allowed_edges`
+- `edge_selection`: `preferred` (default) chooses the first preferred edge; `random` chooses randomly from the preferred allowed edges
 - `edge_gap_mm`: inward gap from selected snap edge (`>= 0`)
 
 For facing pages:

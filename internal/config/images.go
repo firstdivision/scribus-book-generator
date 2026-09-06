@@ -6,6 +6,16 @@ type ImageEdge string
 
 type ImageSnapTarget string
 
+type ImageSorting string
+
+type ImageEdgeSelection string
+
+const (
+	ImageSortingNone           ImageSorting = "none"
+	ImageSortingDateAscending  ImageSorting = "date-ascending"
+	ImageSortingDateDescending ImageSorting = "date-descending"
+)
+
 const (
 	ImageEdgeOutside ImageEdge = "outside"
 	ImageEdgeInside  ImageEdge = "inside"
@@ -17,6 +27,11 @@ const (
 	ImageSnapTargetContentArea ImageSnapTarget = "content_area"
 	ImageSnapTargetTrim        ImageSnapTarget = "trim"
 	ImageSnapTargetBleed       ImageSnapTarget = "bleed"
+)
+
+const (
+	ImageEdgeSelectionPreferred ImageEdgeSelection = "preferred"
+	ImageEdgeSelectionRandom    ImageEdgeSelection = "random"
 )
 
 type ImageBorder struct {
@@ -41,6 +56,7 @@ type ImagePlacement struct {
 	SnapTarget   ImageSnapTarget
 	AllowedEdges []ImageEdge
 	Preferred    []ImageEdge
+	Selection    ImageEdgeSelection
 	EdgeGapMM    float64
 }
 
@@ -49,6 +65,7 @@ type ImageLeftovers struct {
 }
 
 type ImageDefaults struct {
+	Sorting   ImageSorting
 	Border    ImageBorder
 	SpacingMM ImageSpacing
 	Sizing    ImageSizing
@@ -57,7 +74,8 @@ type ImageDefaults struct {
 }
 
 type imageTemplateConfig struct {
-	Border struct {
+	Sorting string `yaml:"sorting"`
+	Border  struct {
 		ColorRGB []int    `yaml:"color_rgb"`
 		WidthPt  *float64 `yaml:"width_pt"`
 	} `yaml:"border"`
@@ -76,6 +94,7 @@ type imageTemplateConfig struct {
 		SnapTarget   string   `yaml:"snap_target"`
 		AllowedEdges []string `yaml:"allowed_edges"`
 		Preferred    []string `yaml:"preferred_edges"`
+		Selection    string   `yaml:"edge_selection"`
 		EdgeGapMM    *float64 `yaml:"edge_gap_mm"`
 	} `yaml:"placement"`
 	Leftovers struct {
@@ -85,6 +104,7 @@ type imageTemplateConfig struct {
 
 func DefaultImageDefaults() ImageDefaults {
 	return ImageDefaults{
+		Sorting: ImageSortingNone,
 		Border: ImageBorder{
 			ColorRGB: [3]int{255, 255, 255},
 			WidthPt:  0,
@@ -112,6 +132,7 @@ func DefaultImageDefaults() ImageDefaults {
 				ImageEdgeOutside,
 				ImageEdgeTop,
 			},
+			Selection: ImageEdgeSelectionPreferred,
 			EdgeGapMM: 0,
 		},
 		Leftovers: ImageLeftovers{
@@ -122,6 +143,10 @@ func DefaultImageDefaults() ImageDefaults {
 
 func parseImageDefaults(raw imageTemplateConfig, defaults ImageDefaults) (ImageDefaults, error) {
 	parsed := defaults
+
+	if raw.Sorting != "" {
+		parsed.Sorting = ImageSorting(raw.Sorting)
+	}
 
 	if raw.Border.ColorRGB != nil {
 		if len(raw.Border.ColorRGB) != 3 {
@@ -173,6 +198,9 @@ func parseImageDefaults(raw imageTemplateConfig, defaults ImageDefaults) (ImageD
 		}
 		parsed.Placement.Preferred = parsedPreferred
 	}
+	if raw.Placement.Selection != "" {
+		parsed.Placement.Selection = ImageEdgeSelection(raw.Placement.Selection)
+	}
 	if raw.Placement.EdgeGapMM != nil {
 		parsed.Placement.EdgeGapMM = *raw.Placement.EdgeGapMM
 	}
@@ -188,6 +216,9 @@ func parseImageDefaults(raw imageTemplateConfig, defaults ImageDefaults) (ImageD
 }
 
 func (d ImageDefaults) Validate() error {
+	if !isValidImageSorting(d.Sorting) {
+		return fmt.Errorf("images.sorting must be one of none, date-ascending, date-descending")
+	}
 	for _, component := range d.Border.ColorRGB {
 		if component < 0 || component > 255 {
 			return fmt.Errorf("images.border.color_rgb values must be between 0 and 255")
@@ -207,6 +238,9 @@ func (d ImageDefaults) Validate() error {
 	}
 	if !isValidImageSnapTarget(d.Placement.SnapTarget) {
 		return fmt.Errorf("images.placement.snap_target must be one of content_area, trim, bleed")
+	}
+	if d.Placement.Selection != ImageEdgeSelectionPreferred && d.Placement.Selection != ImageEdgeSelectionRandom {
+		return fmt.Errorf("images.placement.edge_selection must be one of preferred, random")
 	}
 	if d.Placement.EdgeGapMM < 0 {
 		return fmt.Errorf("images.placement.edge_gap_mm must be >= 0")
@@ -236,6 +270,15 @@ func (d ImageDefaults) Validate() error {
 	}
 
 	return nil
+}
+
+func isValidImageSorting(sorting ImageSorting) bool {
+	switch sorting {
+	case ImageSortingNone, ImageSortingDateAscending, ImageSortingDateDescending:
+		return true
+	default:
+		return false
+	}
 }
 
 func isValidImageSnapTarget(target ImageSnapTarget) bool {

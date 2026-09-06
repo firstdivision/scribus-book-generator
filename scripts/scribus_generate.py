@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import random
 import sys
 from pathlib import Path
 
@@ -378,16 +379,21 @@ def _resolve_semantic_edge(edge_name, is_right_page):
 	raise RuntimeError(f"unsupported image edge: {edge_name}")
 
 
-def _choose_snap_edge(explicit_edge, allowed_edges, preferred_edges):
+def _choose_snap_edge(explicit_edge, allowed_edges, preferred_edges, edge_selection="preferred"):
 	allowed_set = set(allowed_edges)
 	if explicit_edge is not None:
 		if explicit_edge not in allowed_set:
 			raise RuntimeError(f"layout.json snap_edge '{explicit_edge}' is not allowed by images.placement.allowed_edges")
 		return explicit_edge
 
-	for edge in preferred_edges:
-		if edge in allowed_set:
-			return edge
+	preferred_allowed = [edge for edge in preferred_edges if edge in allowed_set]
+	if edge_selection == "random":
+		if preferred_allowed:
+			return random.choice(preferred_allowed)
+		if allowed_edges:
+			return random.choice(allowed_edges)
+	elif preferred_allowed:
+		return preferred_allowed[0]
 
 	if allowed_edges:
 		return allowed_edges[0]
@@ -1118,7 +1124,7 @@ def _gallery_cell_rects(image_count, columns, content_x, content_y, content_widt
 	return rects
 
 
-def _place_chapter_image(scribus, image_path, image_index, chapter_index, page_number, page_size, margins, layout_mode, first_page_mode, bleed_inside, bleed_outside, bleed_top, bleed_bottom, image_body_top, image_body_height, image_border_rgb, image_border_width_pt, image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside, image_max_width, image_max_height, image_snap_to_edge, image_snap_target, image_allowed_edges, image_preferred_edges, image_edge_gap, layout_index, book_dir, page_roles, is_leftover=False):
+def _place_chapter_image(scribus, image_path, image_index, chapter_index, page_number, page_size, margins, layout_mode, first_page_mode, bleed_inside, bleed_outside, bleed_top, bleed_bottom, image_body_top, image_body_height, image_border_rgb, image_border_width_pt, image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside, image_max_width, image_max_height, image_snap_to_edge, image_snap_target, image_allowed_edges, image_preferred_edges, image_edge_selection, image_edge_gap, layout_index, book_dir, page_roles, is_leftover=False):
 	label = "leftover image" if is_leftover else "image"
 	print(f"placing {label} {image_path.name} into page {page_number}")
 	page_width, page_height = _document_page_size_compat(scribus, page_size)
@@ -1187,7 +1193,7 @@ def _place_chapter_image(scribus, image_path, image_index, chapter_index, page_n
 		chosen_edge = None
 		physical_edge = None
 		if image_snap_to_edge:
-			chosen_edge = _choose_snap_edge(explicit_edge, image_allowed_edges, image_preferred_edges)
+			chosen_edge = _choose_snap_edge(explicit_edge, image_allowed_edges, image_preferred_edges, image_edge_selection)
 			physical_edge = _resolve_semantic_edge(chosen_edge, is_right_page)
 
 		available_width = max(1.0, snap_rect[2] - image_spacing_left - image_spacing_right)
@@ -1357,7 +1363,30 @@ def _place_gallery_pages(scribus, gallery_images, placed_count, chapter_index, c
 	return current_page, placed_count
 
 
-def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_index, start_page, page_size, margins, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, chapter_heading_font_size_pt, chapter_heading_alignment, chapter_heading_spacing_top, chapter_heading_spacing_bottom, image_border_rgb, image_border_width_pt, image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside, image_max_width, image_max_height, image_snap_to_edge, image_snap_target, image_allowed_edges, image_preferred_edges, image_edge_gap, gallery_columns, layout_index, book_dir, page_roles):
+def _decorate_chapter_heading(scribus, frame, x, y, width, height, settings):
+	background = settings.get("background_color_rgb")
+	if background is not None:
+		scribus.setFillColor(_ensure_chapter_heading_color_compat(scribus, background), frame)
+	borders = settings.get("borders") or {}
+	for side in ("top", "bottom", "left", "right"):
+		border = borders.get(side)
+		if not border or border["width_pt"] <= 0:
+			continue
+		# Solid strips keep each side independently editable, inside the title frame.
+		thickness = min(border["width_pt"], height if side in ("top", "bottom") else width)
+		geometry = {
+			"top": (x, y, width, thickness),
+			"bottom": (x, y + height - thickness, width, thickness),
+			"left": (x, y, thickness, height),
+			"right": (x + width - thickness, y, thickness, height),
+		}[side]
+		name = _create_rect_compat(scribus, *geometry, f"{frame}_border_{side}")
+		scribus.setFillColor(_ensure_chapter_heading_color_compat(scribus, border["color_rgb"]), name)
+		scribus.setLineColor("None", name)
+		scribus.setLineWidth(0, name)
+
+
+def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_index, start_page, page_size, margins, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, chapter_heading_font_size_pt, chapter_heading_alignment, chapter_heading_spacing_top, chapter_heading_spacing_bottom, image_border_rgb, image_border_width_pt, image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside, image_max_width, image_max_height, image_snap_to_edge, image_snap_target, image_allowed_edges, image_preferred_edges, image_edge_selection, image_edge_gap, gallery_columns, layout_index, book_dir, page_roles, chapter_heading_decoration=None):
 	page_width, page_height = _document_page_size_compat(scribus, page_size)
 	margin_top, margin_left, margin_right, margin_bottom = margins
 
@@ -1377,6 +1406,7 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 		title_height,
 		f"chapter_{chapter_index}_title",
 	)
+	_decorate_chapter_heading(scribus, title_frame, margin_left, title_top, content_width, title_height, chapter_heading_decoration or {})
 	body_frame = _create_text_frame_compat(
 		scribus,
 		margin_left,
@@ -1421,6 +1451,7 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 			image_snap_target,
 			image_allowed_edges,
 			image_preferred_edges,
+			image_edge_selection,
 			image_edge_gap,
 			layout_index,
 			book_dir,
@@ -1478,6 +1509,7 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 			image_snap_target,
 			image_allowed_edges,
 			image_preferred_edges,
+			image_edge_selection,
 			image_edge_gap,
 			layout_index,
 			book_dir,
@@ -1545,6 +1577,7 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 			image_snap_target,
 			image_allowed_edges,
 			image_preferred_edges,
+			image_edge_selection,
 			image_edge_gap,
 			layout_index,
 			book_dir,
@@ -1696,6 +1729,7 @@ def main() -> int:
 	image_snap_target = images["snap_target"]
 	image_allowed_edges = images.get("allowed_edges") or []
 	image_preferred_edges = images.get("preferred_edges") or []
+	image_edge_selection = images.get("edge_selection") or "preferred"
 	image_edge_gap = images["edge_gap_points"]
 	gallery_columns = images.get("gallery_columns") or 2
 	layout_index = _build_layout_index(layout_plan)
@@ -1792,11 +1826,13 @@ def main() -> int:
 				image_snap_target,
 				image_allowed_edges,
 				image_preferred_edges,
+				image_edge_selection,
 				image_edge_gap,
 				gallery_columns,
 				layout_index,
 				book_dir,
 				page_roles,
+				chapter_heading_decoration=headings,
 			)
 
 		print(f"rendering page numbers across {current_page} pages")

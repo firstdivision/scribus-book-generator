@@ -2,6 +2,7 @@ package chapterheadings
 
 import (
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -26,11 +27,18 @@ type Spacing struct {
 	Bottom float64
 }
 
+type Border struct {
+	ColorRGB [3]int  `json:"color_rgb"`
+	WidthPt  float64 `json:"width_pt"`
+}
+
 type Settings struct {
-	Font      Font
-	ColorRGB  [3]int
-	Alignment Alignment
-	SpacingMM Spacing
+	BackgroundColorRGB *[3]int
+	Borders            map[string]Border
+	Font               Font
+	ColorRGB           [3]int
+	Alignment          Alignment
+	SpacingMM          Spacing
 }
 
 func DefaultSettings() Settings {
@@ -47,6 +55,29 @@ func DefaultSettings() Settings {
 }
 
 func (s Settings) Validate() error {
+	if s.BackgroundColorRGB != nil {
+		for _, component := range *s.BackgroundColorRGB {
+			if component < 0 || component > 255 {
+				return fmt.Errorf("chapter_headings.background_color_rgb values must be between 0 and 255")
+			}
+		}
+	}
+	for side, border := range s.Borders {
+		switch side {
+		case "top", "bottom", "left", "right":
+		default:
+			return fmt.Errorf("chapter_headings.borders: unsupported side %q; use top, bottom, left, right", side)
+		}
+		if math.IsNaN(border.WidthPt) || math.IsInf(border.WidthPt, 0) || border.WidthPt < 0 {
+			return fmt.Errorf("chapter_headings.borders.%s.width_pt must be finite and >= 0", side)
+		}
+		for _, component := range border.ColorRGB {
+			if component < 0 || component > 255 {
+				return fmt.Errorf("chapter_headings.borders.%s.color_rgb values must be between 0 and 255", side)
+			}
+		}
+	}
+
 	if strings.TrimSpace(s.Font.Family) == "" {
 		return fmt.Errorf("chapter_headings.font.family must be non-empty")
 	}
