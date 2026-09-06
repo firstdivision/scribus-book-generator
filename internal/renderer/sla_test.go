@@ -22,7 +22,7 @@ func committedScriptPath(t *testing.T) string {
 }
 
 func TestBuildScribusInvocation(t *testing.T) {
-	invocation := buildScribusInvocation("/tmp/book", "/tmp/book/out/scribus-job.json")
+	invocation := buildScribusInvocation("/tmp/book", "/tmp/book/out/scribus-job.json", ".")
 	if len(invocation) != 8 {
 		t.Fatalf("expected 8 parts, got %d", len(invocation))
 	}
@@ -37,6 +37,11 @@ func TestBuildScribusInvocation(t *testing.T) {
 	}
 	if invocation[7] != "/tmp/book/out/scribus-job.json" {
 		t.Fatalf("expected job path argument, got %q", invocation[7])
+	}
+
+	rooted := buildScribusInvocation("/tmp/book", "/tmp/book/out/scribus-job.json", "/opt/project")
+	if rooted[5] != "/opt/project/scripts/scribus_generate.py" {
+		t.Fatalf("expected root-relative script path, got %q", rooted[5])
 	}
 }
 

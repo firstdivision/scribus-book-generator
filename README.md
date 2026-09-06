@@ -7,6 +7,7 @@
   - [Chapter Markdown](#chapter-markdown)
 - [Running The Generator](#running-the-generator)
   - [Converting HEIC Images](#converting-heic-images)
+- [Desktop GUI](#desktop-gui)
 - [Creating A Template](#creating-a-template)
 - [Template Fields](#template-fields)
   - [document](#document)
@@ -16,6 +17,7 @@
   - [chapter_headings](#chapter_headings)
   - [images](#images)
   - [book.yaml layout](#bookyaml-layout)
+  - [book.yaml overrides](#bookyaml-overrides)
   - [page_numbers](#page_numbers)
 - [Defaults](#defaults)
 - [Current Scope](#current-scope)
@@ -64,7 +66,7 @@ books/
 
 Rules:
 
-- `book.yaml` selects the template.
+- `book.yaml` selects the template and may override individual template values (see [book.yaml overrides](#bookyaml-overrides)).
 - Each chapter lives in its own folder.
 - Each chapter folder must contain at least one `.md` file.
 - Images are discovered from the same chapter folder.
@@ -115,9 +117,49 @@ The script requires either `heif-convert` (Debian/Ubuntu package `libheif-exampl
 ./scripts/convert-heic.sh books/sample-book/ [--quality N] [--force]
 ```
 
+## Desktop GUI
+
+`bookgen-gui` is a Linux desktop editor (built with [Fyne](https://fyne.io)) for the same book directories the CLI consumes. It never talks to Scribus directly; it edits `book.yaml` and runs the same pipeline as `bookgen`.
+
+It can:
+
+- open an existing book directory or create a new one (`book.yaml` + `chapters/`)
+- choose the base template from every `*.yaml`/`*.yml` under the project's `templates/` directory
+- browse chapters (the first tab) and double-click one (or press **Edit chapter**) to open the chapter editor: the chapter's Markdown on the left, a thumbnail grid of every image in the chapter directory on the right. Selecting an image shows its `layout.images` fields (placement, bleed, snap edge, width/height, border); changing a field adds the image to `book.yaml` if it is not already listed, and **Reset to defaults** removes its entry again
+- edit `layout.title` and the whole `layout.images` list in order, with thumbnails, add/remove/reorder, and every per-image field
+- override any template value per book; each field shows the inherited template value next to an **Override** checkbox, and only overridden fields are written under `overrides:`
+- create chapter directories (`chapters/<n>-<slug>/text.md`), import images into a chapter, and open a chapter's Markdown or folder in the system default application
+- run generation (optionally converting HEIC first) with a live log, then open the resulting `.sla` in Scribus
+
+**Save** writes `book.yaml` and any chapter Markdown edited in the chapter editor; a chapter that had no Markdown file gets `text.md` created.
+
+Build prerequisites (cgo plus X11/OpenGL headers), on Debian/Ubuntu:
+
+```bash
+sudo apt install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev libwayland-dev
+```
+
+The binary is behind the `gui` build tag so the default `go build ./...` stays header-free:
+
+```bash
+go build -tags gui -o bookgen-gui ./cmd/bookgen-gui
+./bookgen-gui [books/sample-book]
+```
+
+The project root (the directory containing `templates/` and `scripts/`) is discovered by walking up from the opened book, remembered between runs, and can be changed with **Project root…**. The last opened book is reopened on start.
+
+Limitations:
+
+- Saving rewrites `book.yaml` from its parsed form; comments and key order in a hand-edited file are not preserved. Chapter Markdown is rewritten verbatim from the editor.
+- Thumbnails are shown for PNG, JPEG, GIF, and WebP; other formats (HEIC, SVG) show an empty preview.
+- The chapter editor is a plain text area; there is no Markdown preview.
+- The `bookgen-gui` package itself is not unit tested (it only wires `app.New()` to `internal/gui`); the `internal/gui` package is tested headlessly with Fyne's test driver.
+
 ## Creating A Template
 
-Templates are YAML files stored under `templates/`. A book selects one template by filename.
+Templates are YAML files stored under `templates/`. A book selects one template by name in `book.yaml`; the name is resolved as an absolute path, then relative to the book directory, then as `templates/*/<name>` or `templates/<name>` in the book directory or any parent (so both `a4-landscape.yaml` and `lulu/a4-landscape.yaml` work).
+
+Every template value is optional. A value that is present is applied on top of the built-in [defaults](#defaults); a value that is absent is inherited. `0` is an explicit value, not "unset": `bleed: {top: 0}` sets a zero bleed.
 
 Example:
 
@@ -438,6 +480,40 @@ In-flow images are placed one per page only while body text still overflows. Aft
 - remaining leftovers pack into an end-of-chapter gallery (page role `chapter_gallery`)
 
 If every leftover is full-page, there is no gallery. Gallery pages center the occupied cells vertically and horizontally: the last page may hold a short row, and the grid adapts its column count so the row is centered rather than stretched. Single-row results that factor into a square-like grid (2x2, 2x3, 3x3, …) are converted automatically; on height-constrained pages the single row is kept when it would yield larger cells.
+
+### `book.yaml` overrides
+
+A book can override any template value without editing the shared template. Put the same keys a template accepts under `overrides:`; each present value replaces the template's value for this book only, and absent values are inherited. Precedence is built-in defaults, then the template, then `overrides`.
+
+```yaml
+template: a4-landscape.yaml
+
+overrides:
+  page:
+    orientation: portrait
+  bleed:
+    top: 0
+  chapter_headings:
+    font:
+      size_pt: 34
+  images:
+    border:
+      width_pt: 0
+  page_numbers:
+    enabled: false
+
+layout:
+  title: My Book
+  images: []
+```
+
+Notes:
+
+- `overrides` uses the template schema (`document`, `page`, `bleed`, `safety_margin`, `chapter_headings`, `images`, `page_numbers`), not the `layout` schema. Per-image directives stay under `layout.images`.
+- `page.width_mm` and `page.height_mm` must be overridden together. Overriding only `page.size` or `page.orientation` recomputes the page dimensions from the named size.
+- `chapter_headings.borders`, `images.placement.allowed_edges`, `images.placement.preferred_edges`, and `page_numbers.hide_on` replace the template's whole list/map when present.
+- Overrides are validated with the same rules as templates; an invalid override fails the load with an error prefixed `overrides:`.
+- `overrides` may be used without `template`, in which case it is applied over the built-in defaults.
 
 ### `page_numbers`
 

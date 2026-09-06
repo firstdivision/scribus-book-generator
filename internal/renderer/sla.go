@@ -2,6 +2,7 @@ package renderer
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +22,27 @@ type Result struct {
 	PDFPath string
 }
 
+// Options controls where the Scribus adapter script is found and where its output goes.
+type Options struct {
+	// RootDir is the project root containing scripts/; "." when empty.
+	RootDir string
+	Stdout  io.Writer
+	Stderr  io.Writer
+}
+
+func (o Options) withDefaults() Options {
+	if o.RootDir == "" {
+		o.RootDir = "."
+	}
+	if o.Stdout == nil {
+		o.Stdout = os.Stdout
+	}
+	if o.Stderr == nil {
+		o.Stderr = os.Stderr
+	}
+	return o
+}
+
 // Generate loads and validates a book directory, then runs Scribus.
 func Generate(bookDir string) (Result, error) {
 	loaded, err := book.Load(bookDir)
@@ -32,13 +54,19 @@ func Generate(bookDir string) (Result, error) {
 
 // GenerateFromBook writes a Scribus job JSON and runs the committed Python adapter.
 func GenerateFromBook(loaded book.Book) (Result, error) {
+	return GenerateFromBookWithOptions(loaded, Options{})
+}
+
+// GenerateFromBookWithOptions is GenerateFromBook with an explicit project root and output writers.
+func GenerateFromBookWithOptions(loaded book.Book, opts Options) (Result, error) {
+	opts = opts.withDefaults()
 	jobPath := filepath.Join(loaded.Dir, "out", scribusJobFileName)
 	if err := writeScribusJob(jobPath, loaded.Config, loaded.Plan); err != nil {
 		return Result{}, fmt.Errorf("write Scribus job: %w", err)
 	}
 
-	cmd := buildScribusInvocation(loaded.Dir, jobPath)
-	if err := runCommand(cmd); err != nil {
+	cmd := buildScribusInvocation(loaded.Dir, jobPath, opts.RootDir)
+	if err := runCommand(cmd, opts.Stdout, opts.Stderr); err != nil {
 		return Result{}, err
 	}
 
@@ -68,14 +96,18 @@ func outputFilenameStem(title, bookDirName string) string {
 	return stem
 }
 
-func buildScribusInvocation(bookDir, jobPath string) []string {
-	return []string{"xvfb-run", "-a", "scribus", "-g", "-py", scribusScriptPath, bookDir, jobPath}
+func buildScribusInvocation(bookDir, jobPath, rootDir string) []string {
+	script := scribusScriptPath
+	if rootDir != "" && rootDir != "." {
+		script = filepath.Join(rootDir, scribusScriptPath)
+	}
+	return []string{"xvfb-run", "-a", "scribus", "-g", "-py", script, bookDir, jobPath}
 }
 
-func runCommand(cmd []string) error {
+func runCommand(cmd []string, stdout, stderr io.Writer) error {
 	command := exec.Command(cmd[0], cmd[1:]...)
-	command.Stdout = os.Stdout
-	command.Stderr = os.Stderr
+	command.Stdout = stdout
+	command.Stderr = stderr
 	if err := command.Run(); err != nil {
 		return fmt.Errorf("run %s: %w", strings.Join(cmd, " "), err)
 	}

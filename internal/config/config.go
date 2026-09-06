@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"scribus-book-generator/internal/layout/chapterheadings"
@@ -54,81 +55,83 @@ func Default() Config {
 }
 
 type bookConfigFile struct {
-	Template string `yaml:"template"`
+	Template  string        `yaml:"template"`
+	Overrides *TemplateFile `yaml:"overrides"`
 }
 
-type chapterHeadingBorderConfig struct {
-	ColorRGB []int    `yaml:"color_rgb"`
-	WidthPt  *float64 `yaml:"width_pt"`
+// TemplateFile is the YAML shape shared by template files and the book.yaml
+// `overrides` block. Every leaf is a pointer so that an explicit zero can be
+// distinguished from an unset value.
+type TemplateFile struct {
+	Document        DocumentTemplate       `yaml:"document,omitempty"`
+	Page            PageTemplate           `yaml:"page,omitempty"`
+	Bleed           SidesTemplate          `yaml:"bleed,omitempty"`
+	SafetyMargin    SidesTemplate          `yaml:"safety_margin,omitempty"`
+	ChapterHeadings ChapterHeadingTemplate `yaml:"chapter_headings,omitempty"`
+	Images          ImageTemplate          `yaml:"images,omitempty"`
+	PageNumbers     PageNumberTemplate     `yaml:"page_numbers,omitempty"`
 }
 
-type chapterHeadingTemplateConfig struct {
-	BackgroundColorRGB []int                                  `yaml:"background_color_rgb"`
-	Borders            map[string]*chapterHeadingBorderConfig `yaml:"borders"`
-	Font               struct {
-		Family *string  `yaml:"family"`
-		Style  *string  `yaml:"style"`
-		SizePt *float64 `yaml:"size_pt"`
-	} `yaml:"font"`
-	ColorRGB  []int   `yaml:"color_rgb"`
-	Alignment *string `yaml:"alignment"`
-	SpacingMM struct {
-		Top    *float64 `yaml:"top"`
-		Bottom *float64 `yaml:"bottom"`
-	} `yaml:"spacing_mm"`
+type DocumentTemplate struct {
+	Units     *string `yaml:"units,omitempty"`
+	Layout    *string `yaml:"layout,omitempty"`
+	FirstPage *string `yaml:"first_page,omitempty"`
 }
 
-type templateConfigFile struct {
-	Document struct {
-		Units     string `yaml:"units"`
-		Layout    string `yaml:"layout"`
-		FirstPage string `yaml:"first_page"`
-	} `yaml:"document"`
-	Page struct {
-		WidthMM            float64 `yaml:"width_mm"`
-		HeightMM           float64 `yaml:"height_mm"`
-		Size               string  `yaml:"size"`
-		Orientation        string  `yaml:"orientation"`
-		Layout             string  `yaml:"layout"`
-		FirstPage          string  `yaml:"first_page"`
-		BackgroundColorRGB *[3]int `yaml:"background_color_rgb"`
-	} `yaml:"page"`
-	Bleed struct {
-		Top     float64 `yaml:"top"`
-		Bottom  float64 `yaml:"bottom"`
-		Inside  float64 `yaml:"inside"`
-		Outside float64 `yaml:"outside"`
-	} `yaml:"bleed"`
-	SafetyMargin struct {
-		Top     float64 `yaml:"top"`
-		Bottom  float64 `yaml:"bottom"`
-		Inside  float64 `yaml:"inside"`
-		Outside float64 `yaml:"outside"`
-	} `yaml:"safety_margin"`
-	ChapterHeadings *chapterHeadingTemplateConfig `yaml:"chapter_headings"`
-	Images          imageTemplateConfig           `yaml:"images"`
-	PageNumbers     *struct {
-		Enabled     *bool  `yaml:"enabled"`
-		StartOnPage *int   `yaml:"start_on_page"`
-		StartNumber *int   `yaml:"start_number"`
-		Format      string `yaml:"format"`
-		Position    string `yaml:"position"`
-		Font        struct {
-			Family string   `yaml:"family"`
-			Style  string   `yaml:"style"`
-			SizePt *float64 `yaml:"size_pt"`
-		} `yaml:"font"`
-		ColorRGB []int `yaml:"color_rgb"`
-		OffsetMM struct {
-			Top     *float64 `yaml:"top"`
-			Bottom  *float64 `yaml:"bottom"`
-			Inside  *float64 `yaml:"inside"`
-			Outside *float64 `yaml:"outside"`
-		} `yaml:"offset_mm"`
-		HideOn []string `yaml:"hide_on"`
-	} `yaml:"page_numbers"`
+type PageTemplate struct {
+	WidthMM            *float64 `yaml:"width_mm,omitempty"`
+	HeightMM           *float64 `yaml:"height_mm,omitempty"`
+	Size               *string  `yaml:"size,omitempty"`
+	Orientation        *string  `yaml:"orientation,omitempty"`
+	Layout             *string  `yaml:"layout,omitempty"`
+	FirstPage          *string  `yaml:"first_page,omitempty"`
+	BackgroundColorRGB *[3]int  `yaml:"background_color_rgb,omitempty"`
 }
 
+type SidesTemplate struct {
+	Top     *float64 `yaml:"top,omitempty"`
+	Bottom  *float64 `yaml:"bottom,omitempty"`
+	Inside  *float64 `yaml:"inside,omitempty"`
+	Outside *float64 `yaml:"outside,omitempty"`
+}
+
+type FontTemplate struct {
+	Family *string  `yaml:"family,omitempty"`
+	Style  *string  `yaml:"style,omitempty"`
+	SizePt *float64 `yaml:"size_pt,omitempty"`
+}
+
+type ChapterHeadingBorderTemplate struct {
+	ColorRGB []int    `yaml:"color_rgb,omitempty"`
+	WidthPt  *float64 `yaml:"width_pt,omitempty"`
+}
+
+type ChapterHeadingTemplate struct {
+	BackgroundColorRGB []int                                    `yaml:"background_color_rgb,omitempty"`
+	Borders            map[string]*ChapterHeadingBorderTemplate `yaml:"borders,omitempty"`
+	Font               FontTemplate                             `yaml:"font,omitempty"`
+	ColorRGB           []int                                    `yaml:"color_rgb,omitempty"`
+	Alignment          *string                                  `yaml:"alignment,omitempty"`
+	SpacingMM          struct {
+		Top    *float64 `yaml:"top,omitempty"`
+		Bottom *float64 `yaml:"bottom,omitempty"`
+	} `yaml:"spacing_mm,omitempty"`
+}
+
+type PageNumberTemplate struct {
+	Enabled     *bool         `yaml:"enabled,omitempty"`
+	StartOnPage *int          `yaml:"start_on_page,omitempty"`
+	StartNumber *int          `yaml:"start_number,omitempty"`
+	Format      *string       `yaml:"format,omitempty"`
+	Position    *string       `yaml:"position,omitempty"`
+	Font        FontTemplate  `yaml:"font,omitempty"`
+	ColorRGB    []int         `yaml:"color_rgb,omitempty"`
+	OffsetMM    SidesTemplate `yaml:"offset_mm,omitempty"`
+	HideOn      []string      `yaml:"hide_on,omitempty"`
+}
+
+// LoadForBook resolves the effective configuration for a book directory:
+// built-in defaults, then the referenced template, then book.yaml `overrides`.
 func LoadForBook(bookDir string) (Config, error) {
 	cfg := Default()
 	bookConfigPath := filepath.Join(bookDir, "book.yaml")
@@ -146,35 +149,69 @@ func LoadForBook(bookDir string) (Config, error) {
 		return cfg, err
 	}
 
-	templateName := strings.TrimSpace(bookFile.Template)
-	if templateName == "" {
-		return cfg, nil
+	return Resolve(bookDir, bookFile.Template, bookFile.Overrides)
+}
+
+// Resolve merges defaults, the named template (may be empty), and overrides (may be nil).
+func Resolve(bookDir, templateName string, overrides *TemplateFile) (Config, error) {
+	cfg := Default()
+
+	templateName = strings.TrimSpace(templateName)
+	if templateName != "" {
+		templateFile, err := LoadTemplate(bookDir, templateName)
+		if err != nil {
+			return cfg, err
+		}
+		cfg, err = ApplyTemplate(cfg, templateFile)
+		if err != nil {
+			return cfg, fmt.Errorf("template %s: %w", templateName, err)
+		}
 	}
 
-	templatePath, err := resolveTemplatePath(bookDir, templateName)
+	if overrides != nil {
+		var err error
+		cfg, err = ApplyTemplate(cfg, *overrides)
+		if err != nil {
+			return cfg, fmt.Errorf("overrides: %w", err)
+		}
+	}
+
+	return cfg, nil
+}
+
+// LoadTemplate resolves templateName relative to bookDir and parses it.
+func LoadTemplate(bookDir, templateName string) (TemplateFile, error) {
+	templatePath, err := ResolveTemplatePath(bookDir, templateName)
 	if err != nil {
-		return cfg, err
+		return TemplateFile{}, err
 	}
+	return ReadTemplateFile(templatePath)
+}
 
-	templateData, err := os.ReadFile(templatePath)
+// ReadTemplateFile parses a template YAML file without applying it.
+func ReadTemplateFile(path string) (TemplateFile, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return cfg, err
+		return TemplateFile{}, err
 	}
-
-	var templateFile templateConfigFile
-	if err := yaml.Unmarshal(templateData, &templateFile); err != nil {
-		return cfg, err
+	var templateFile TemplateFile
+	if err := yaml.Unmarshal(data, &templateFile); err != nil {
+		return TemplateFile{}, err
 	}
+	return templateFile, nil
+}
 
-	cfg.DocumentUnits = defaultString(templateFile.Document.Units, cfg.DocumentUnits)
-	cfg.PageLayout = defaultString(firstNonEmpty(templateFile.Document.Layout, templateFile.Page.Layout), cfg.PageLayout)
-	cfg.FirstPage = defaultString(firstNonEmpty(templateFile.Document.FirstPage, templateFile.Page.FirstPage), cfg.FirstPage)
-	cfg.PageSize = defaultString(templateFile.Page.Size, cfg.PageSize)
-	cfg.PageOrientation = defaultString(templateFile.Page.Orientation, cfg.PageOrientation)
+// ApplyTemplate layers the set (non-nil) values of templateFile over cfg.
+func ApplyTemplate(cfg Config, templateFile TemplateFile) (Config, error) {
+	cfg.DocumentUnits = defaultString(deref(templateFile.Document.Units), cfg.DocumentUnits)
+	cfg.PageLayout = defaultString(firstNonEmpty(deref(templateFile.Document.Layout), deref(templateFile.Page.Layout)), cfg.PageLayout)
+	cfg.FirstPage = defaultString(firstNonEmpty(deref(templateFile.Document.FirstPage), deref(templateFile.Page.FirstPage)), cfg.FirstPage)
+	cfg.PageSize = defaultString(deref(templateFile.Page.Size), cfg.PageSize)
+	cfg.PageOrientation = defaultString(deref(templateFile.Page.Orientation), cfg.PageOrientation)
 	if templateFile.Page.BackgroundColorRGB != nil {
 		cfg.PageBackgroundRGB = templateFile.Page.BackgroundColorRGB
 	}
-	pageNumbers, err := parsePageNumberSettings(templateFile.PageNumbers)
+	pageNumbers, err := parsePageNumberSettings(templateFile.PageNumbers, cfg.PageNumbers)
 	if err != nil {
 		return cfg, err
 	}
@@ -184,38 +221,38 @@ func LoadForBook(bookDir string) (Config, error) {
 		return cfg, err
 	}
 
-	if templateFile.Page.WidthMM > 0 && templateFile.Page.HeightMM > 0 {
-		cfg.PageWidth = templateFile.Page.WidthMM
-		cfg.PageHeight = templateFile.Page.HeightMM
-	} else if widthMM, heightMM, ok := pageDimensionsMM(cfg.PageSize, cfg.PageOrientation); ok {
-		cfg.PageWidth = widthMM
-		cfg.PageHeight = heightMM
+	if (templateFile.Page.WidthMM == nil) != (templateFile.Page.HeightMM == nil) {
+		return cfg, fmt.Errorf("page.width_mm and page.height_mm must be set together")
 	}
-	if templateFile.SafetyMargin.Top > 0 {
-		cfg.MarginTop = templateFile.SafetyMargin.Top
+	if templateFile.Page.WidthMM != nil && templateFile.Page.HeightMM != nil {
+		cfg.PageWidth = *templateFile.Page.WidthMM
+		cfg.PageHeight = *templateFile.Page.HeightMM
+	} else if templateFile.Page.Size != nil || templateFile.Page.Orientation != nil {
+		if widthMM, heightMM, ok := pageDimensionsMM(cfg.PageSize, cfg.PageOrientation); ok {
+			cfg.PageWidth = widthMM
+			cfg.PageHeight = heightMM
+		}
 	}
-	if templateFile.SafetyMargin.Bottom > 0 {
-		cfg.MarginBottom = templateFile.SafetyMargin.Bottom
-	}
-	if templateFile.SafetyMargin.Inside > 0 {
-		cfg.MarginLeft = templateFile.SafetyMargin.Inside
-	}
-	if templateFile.SafetyMargin.Outside > 0 {
-		cfg.MarginRight = templateFile.SafetyMargin.Outside
+	if cfg.PageWidth <= 0 || cfg.PageHeight <= 0 {
+		return cfg, fmt.Errorf("page.width_mm and page.height_mm must be > 0")
 	}
 
-	if templateFile.Bleed.Top > 0 {
-		cfg.BleedTop = templateFile.Bleed.Top
+	setFloat(&cfg.MarginTop, templateFile.SafetyMargin.Top)
+	setFloat(&cfg.MarginBottom, templateFile.SafetyMargin.Bottom)
+	setFloat(&cfg.MarginLeft, templateFile.SafetyMargin.Inside)
+	setFloat(&cfg.MarginRight, templateFile.SafetyMargin.Outside)
+	if cfg.MarginTop < 0 || cfg.MarginBottom < 0 || cfg.MarginLeft < 0 || cfg.MarginRight < 0 {
+		return cfg, fmt.Errorf("safety_margin values must be >= 0")
 	}
-	if templateFile.Bleed.Bottom > 0 {
-		cfg.BleedBottom = templateFile.Bleed.Bottom
+
+	setFloat(&cfg.BleedTop, templateFile.Bleed.Top)
+	setFloat(&cfg.BleedBottom, templateFile.Bleed.Bottom)
+	setFloat(&cfg.BleedInside, templateFile.Bleed.Inside)
+	setFloat(&cfg.BleedOutside, templateFile.Bleed.Outside)
+	if cfg.BleedTop < 0 || cfg.BleedBottom < 0 || cfg.BleedInside < 0 || cfg.BleedOutside < 0 {
+		return cfg, fmt.Errorf("bleed values must be >= 0")
 	}
-	if templateFile.Bleed.Inside > 0 {
-		cfg.BleedInside = templateFile.Bleed.Inside
-	}
-	if templateFile.Bleed.Outside > 0 {
-		cfg.BleedOutside = templateFile.Bleed.Outside
-	}
+
 	cfg.Images, err = parseImageDefaults(templateFile.Images, cfg.Images)
 	if err != nil {
 		return cfg, err
@@ -224,11 +261,21 @@ func LoadForBook(bookDir string) (Config, error) {
 	return cfg, nil
 }
 
-func parseChapterHeadingSettings(raw *chapterHeadingTemplateConfig, defaults chapterheadings.Settings) (chapterheadings.Settings, error) {
-	settings := defaults
-	if raw == nil {
-		return settings, nil
+func deref(value *string) string {
+	if value == nil {
+		return ""
 	}
+	return *value
+}
+
+func setFloat(dst *float64, src *float64) {
+	if src != nil {
+		*dst = *src
+	}
+}
+
+func parseChapterHeadingSettings(raw ChapterHeadingTemplate, defaults chapterheadings.Settings) (chapterheadings.Settings, error) {
+	settings := defaults
 
 	if raw.Font.Family != nil {
 		settings.Font.Family = strings.TrimSpace(*raw.Font.Family)
@@ -287,30 +334,8 @@ func parseChapterHeadingSettings(raw *chapterHeadingTemplateConfig, defaults cha
 	return settings, nil
 }
 
-func parsePageNumberSettings(raw *struct {
-	Enabled     *bool  `yaml:"enabled"`
-	StartOnPage *int   `yaml:"start_on_page"`
-	StartNumber *int   `yaml:"start_number"`
-	Format      string `yaml:"format"`
-	Position    string `yaml:"position"`
-	Font        struct {
-		Family string   `yaml:"family"`
-		Style  string   `yaml:"style"`
-		SizePt *float64 `yaml:"size_pt"`
-	} `yaml:"font"`
-	ColorRGB []int `yaml:"color_rgb"`
-	OffsetMM struct {
-		Top     *float64 `yaml:"top"`
-		Bottom  *float64 `yaml:"bottom"`
-		Inside  *float64 `yaml:"inside"`
-		Outside *float64 `yaml:"outside"`
-	} `yaml:"offset_mm"`
-	HideOn []string `yaml:"hide_on"`
-}) (pagenumbering.Settings, error) {
-	settings := pagenumbering.DefaultSettings()
-	if raw == nil {
-		return settings, nil
-	}
+func parsePageNumberSettings(raw PageNumberTemplate, defaults pagenumbering.Settings) (pagenumbering.Settings, error) {
+	settings := defaults
 
 	if raw.Enabled != nil {
 		settings.Enabled = *raw.Enabled
@@ -321,16 +346,16 @@ func parsePageNumberSettings(raw *struct {
 	if raw.StartNumber != nil {
 		settings.StartNumber = *raw.StartNumber
 	}
-	if trimmed := strings.TrimSpace(raw.Format); trimmed != "" {
+	if trimmed := strings.TrimSpace(deref(raw.Format)); trimmed != "" {
 		settings.Format = pagenumbering.NumberFormat(trimmed)
 	}
-	if trimmed := strings.TrimSpace(raw.Position); trimmed != "" {
+	if trimmed := strings.TrimSpace(deref(raw.Position)); trimmed != "" {
 		settings.Position = pagenumbering.Position(trimmed)
 	}
-	if trimmed := strings.TrimSpace(raw.Font.Family); trimmed != "" {
+	if trimmed := strings.TrimSpace(deref(raw.Font.Family)); trimmed != "" {
 		settings.Font.Family = trimmed
 	}
-	if trimmed := strings.TrimSpace(raw.Font.Style); trimmed != "" {
+	if trimmed := strings.TrimSpace(deref(raw.Font.Style)); trimmed != "" {
 		settings.Font.Style = trimmed
 	}
 	if raw.Font.SizePt != nil {
@@ -414,7 +439,9 @@ func paperSizeMM(size string) (float64, float64, bool) {
 	}
 }
 
-func resolveTemplatePath(bookDir, templateName string) (string, error) {
+// ResolveTemplatePath locates templateName as an absolute path, relative to
+// bookDir, or under a templates/ directory in bookDir or any of its parents.
+func ResolveTemplatePath(bookDir, templateName string) (string, error) {
 	if filepath.IsAbs(templateName) {
 		return templateName, nil
 	}
@@ -452,4 +479,61 @@ func resolveTemplatePath(bookDir, templateName string) (string, error) {
 	}
 
 	return "", fmt.Errorf("template %q not found under any templates directory", templateName)
+}
+
+// TemplateRef is a template discovered under a project's templates/ directory.
+type TemplateRef struct {
+	// Name is the value to store in book.yaml `template:`, relative to templates/.
+	Name string
+	Path string
+}
+
+// ListTemplates returns every *.yaml file under <root>/templates, sorted by Name.
+func ListTemplates(root string) ([]TemplateRef, error) {
+	templatesDir := filepath.Join(root, "templates")
+	var refs []TemplateRef
+	err := filepath.WalkDir(templatesDir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext != ".yaml" && ext != ".yml" {
+			return nil
+		}
+		rel, err := filepath.Rel(templatesDir, path)
+		if err != nil {
+			return err
+		}
+		refs = append(refs, TemplateRef{Name: filepath.ToSlash(rel), Path: path})
+		return nil
+	})
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	sort.Slice(refs, func(i, j int) bool { return refs[i].Name < refs[j].Name })
+	return refs, nil
+}
+
+// FindProjectRoot walks up from startDir to the nearest directory containing templates/.
+func FindProjectRoot(startDir string) (string, error) {
+	dir, err := filepath.Abs(startDir)
+	if err != nil {
+		return "", err
+	}
+	for {
+		if info, err := os.Stat(filepath.Join(dir, "templates")); err == nil && info.IsDir() {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("no templates directory found above %s", startDir)
+		}
+		dir = parent
+	}
 }

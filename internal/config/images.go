@@ -73,33 +73,28 @@ type ImageDefaults struct {
 	Leftovers ImageLeftovers
 }
 
-type imageTemplateConfig struct {
-	Sorting string `yaml:"sorting"`
+type ImageTemplate struct {
+	Sorting *string `yaml:"sorting,omitempty"`
 	Border  struct {
-		ColorRGB []int    `yaml:"color_rgb"`
-		WidthPt  *float64 `yaml:"width_pt"`
-	} `yaml:"border"`
-	SpacingMM struct {
-		Top     *float64 `yaml:"top"`
-		Bottom  *float64 `yaml:"bottom"`
-		Inside  *float64 `yaml:"inside"`
-		Outside *float64 `yaml:"outside"`
-	} `yaml:"spacing_mm"`
-	Sizing struct {
-		MaxWidthMM  *float64 `yaml:"max_width_mm"`
-		MaxHeightMM *float64 `yaml:"max_height_mm"`
-	} `yaml:"sizing"`
+		ColorRGB []int    `yaml:"color_rgb,omitempty"`
+		WidthPt  *float64 `yaml:"width_pt,omitempty"`
+	} `yaml:"border,omitempty"`
+	SpacingMM SidesTemplate `yaml:"spacing_mm,omitempty"`
+	Sizing    struct {
+		MaxWidthMM  *float64 `yaml:"max_width_mm,omitempty"`
+		MaxHeightMM *float64 `yaml:"max_height_mm,omitempty"`
+	} `yaml:"sizing,omitempty"`
 	Placement struct {
-		SnapToEdge   *bool    `yaml:"snap_to_edge"`
-		SnapTarget   string   `yaml:"snap_target"`
-		AllowedEdges []string `yaml:"allowed_edges"`
-		Preferred    []string `yaml:"preferred_edges"`
-		Selection    string   `yaml:"edge_selection"`
-		EdgeGapMM    *float64 `yaml:"edge_gap_mm"`
-	} `yaml:"placement"`
+		SnapToEdge   *bool    `yaml:"snap_to_edge,omitempty"`
+		SnapTarget   *string  `yaml:"snap_target,omitempty"`
+		AllowedEdges []string `yaml:"allowed_edges,omitempty"`
+		Preferred    []string `yaml:"preferred_edges,omitempty"`
+		Selection    *string  `yaml:"edge_selection,omitempty"`
+		EdgeGapMM    *float64 `yaml:"edge_gap_mm,omitempty"`
+	} `yaml:"placement,omitempty"`
 	Leftovers struct {
-		GalleryColumns *int `yaml:"gallery_columns"`
-	} `yaml:"leftovers"`
+		GalleryColumns *int `yaml:"gallery_columns,omitempty"`
+	} `yaml:"leftovers,omitempty"`
 }
 
 func DefaultImageDefaults() ImageDefaults {
@@ -141,11 +136,11 @@ func DefaultImageDefaults() ImageDefaults {
 	}
 }
 
-func parseImageDefaults(raw imageTemplateConfig, defaults ImageDefaults) (ImageDefaults, error) {
+func parseImageDefaults(raw ImageTemplate, defaults ImageDefaults) (ImageDefaults, error) {
 	parsed := defaults
 
-	if raw.Sorting != "" {
-		parsed.Sorting = ImageSorting(raw.Sorting)
+	if raw.Sorting != nil && *raw.Sorting != "" {
+		parsed.Sorting = ImageSorting(*raw.Sorting)
 	}
 
 	if raw.Border.ColorRGB != nil {
@@ -181,8 +176,8 @@ func parseImageDefaults(raw imageTemplateConfig, defaults ImageDefaults) (ImageD
 	if raw.Placement.SnapToEdge != nil {
 		parsed.Placement.SnapToEdge = *raw.Placement.SnapToEdge
 	}
-	if raw.Placement.SnapTarget != "" {
-		parsed.Placement.SnapTarget = ImageSnapTarget(raw.Placement.SnapTarget)
+	if raw.Placement.SnapTarget != nil && *raw.Placement.SnapTarget != "" {
+		parsed.Placement.SnapTarget = ImageSnapTarget(*raw.Placement.SnapTarget)
 	}
 	if raw.Placement.AllowedEdges != nil {
 		parsedAllowed := make([]ImageEdge, 0, len(raw.Placement.AllowedEdges))
@@ -198,8 +193,8 @@ func parseImageDefaults(raw imageTemplateConfig, defaults ImageDefaults) (ImageD
 		}
 		parsed.Placement.Preferred = parsedPreferred
 	}
-	if raw.Placement.Selection != "" {
-		parsed.Placement.Selection = ImageEdgeSelection(raw.Placement.Selection)
+	if raw.Placement.Selection != nil && *raw.Placement.Selection != "" {
+		parsed.Placement.Selection = ImageEdgeSelection(*raw.Placement.Selection)
 	}
 	if raw.Placement.EdgeGapMM != nil {
 		parsed.Placement.EdgeGapMM = *raw.Placement.EdgeGapMM

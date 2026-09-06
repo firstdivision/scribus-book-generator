@@ -357,3 +357,183 @@ func TestLoadForBookRejectsInvalidChapterHeadingConfig(t *testing.T) {
 		})
 	}
 }
+
+func writeOverrideFixture(t *testing.T, bookYAML string) string {
+	t.Helper()
+	bookDir := t.TempDir()
+	templateDir := filepath.Join(bookDir, "templates", "lulu")
+	if err := os.MkdirAll(templateDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	template := `document:
+  units: mm
+  layout: facing_pages
+page:
+  size: A4
+  orientation: landscape
+bleed:
+  top: 3.18
+  bottom: 3.18
+  inside: 3.18
+  outside: 3.18
+safety_margin:
+  top: 12.7
+  bottom: 12.7
+  inside: 12.7
+  outside: 12.7
+chapter_headings:
+  font:
+    size_pt: 28
+  spacing_mm:
+    top: 20
+images:
+  border:
+    width_pt: 11
+  sizing:
+    max_width_mm: 120
+page_numbers:
+  enabled: true
+  format: arabic
+  offset_mm:
+    top: 7
+`
+	if err := os.WriteFile(filepath.Join(templateDir, "base.yaml"), []byte(template), 0o644); err != nil {
+		t.Fatalf("WriteFile template returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(bookDir, "book.yaml"), []byte(bookYAML), 0o644); err != nil {
+		t.Fatalf("WriteFile book.yaml returned error: %v", err)
+	}
+	return bookDir
+}
+
+func TestLoadForBookAppliesOverridesOverTemplate(t *testing.T) {
+	bookDir := writeOverrideFixture(t, `template: base.yaml
+overrides:
+  page:
+    orientation: portrait
+  bleed:
+    top: 0
+    inside: 5
+  safety_margin:
+    outside: 0
+  chapter_headings:
+    font:
+      size_pt: 40
+  images:
+    border:
+      width_pt: 0
+  page_numbers:
+    enabled: false
+    offset_mm:
+      bottom: 9
+`)
+
+	cfg, err := LoadForBook(bookDir)
+	if err != nil {
+		t.Fatalf("LoadForBook returned error: %v", err)
+	}
+
+	if cfg.PageOrientation != "portrait" || cfg.PageWidth != 210 || cfg.PageHeight != 297 {
+		t.Fatalf("expected portrait A4 from override, got %s %vx%v", cfg.PageOrientation, cfg.PageWidth, cfg.PageHeight)
+	}
+	if cfg.PageLayout != "facing_pages" {
+		t.Fatalf("expected template page layout to be inherited, got %q", cfg.PageLayout)
+	}
+	if cfg.BleedTop != 0 {
+		t.Fatalf("expected explicit zero bleed.top override, got %v", cfg.BleedTop)
+	}
+	if cfg.BleedInside != 5 || cfg.BleedBottom != 3.18 || cfg.BleedOutside != 3.18 {
+		t.Fatalf("unexpected bleed values: %v %v %v", cfg.BleedInside, cfg.BleedBottom, cfg.BleedOutside)
+	}
+	if cfg.MarginRight != 0 || cfg.MarginLeft != 12.7 {
+		t.Fatalf("expected safety_margin.outside=0 and inside inherited, got right=%v left=%v", cfg.MarginRight, cfg.MarginLeft)
+	}
+	if cfg.ChapterHeadings.Font.SizePt != 40 || cfg.ChapterHeadings.SpacingMM.Top != 20 {
+		t.Fatalf("unexpected chapter heading settings: %+v", cfg.ChapterHeadings)
+	}
+	if cfg.Images.Border.WidthPt != 0 || cfg.Images.Sizing.MaxWidthMM != 120 {
+		t.Fatalf("unexpected image defaults: %+v", cfg.Images)
+	}
+	if cfg.PageNumbers.Enabled || cfg.PageNumbers.OffsetMM.Bottom != 9 || cfg.PageNumbers.OffsetMM.Top != 7 {
+		t.Fatalf("unexpected page number settings: %+v", cfg.PageNumbers)
+	}
+}
+
+func TestLoadForBookOverridesWithoutTemplate(t *testing.T) {
+	bookDir := t.TempDir()
+	bookYAML := "overrides:\n  page:\n    width_mm: 150\n    height_mm: 150\n  bleed:\n    top: 2\n"
+	if err := os.WriteFile(filepath.Join(bookDir, "book.yaml"), []byte(bookYAML), 0o644); err != nil {
+		t.Fatalf("WriteFile book.yaml returned error: %v", err)
+	}
+
+	cfg, err := LoadForBook(bookDir)
+	if err != nil {
+		t.Fatalf("LoadForBook returned error: %v", err)
+	}
+	if cfg.PageWidth != 150 || cfg.PageHeight != 150 || cfg.BleedTop != 2 {
+		t.Fatalf("expected overrides applied over defaults, got %+v", cfg)
+	}
+}
+
+func TestLoadForBookRejectsInvalidOverrides(t *testing.T) {
+	tests := []struct {
+		name      string
+		overrides string
+		wantErr   string
+	}{
+		{name: "bad page number format", overrides: "  page_numbers:\n    format: bogus\n", wantErr: "overrides"},
+		{name: "negative bleed", overrides: "  bleed:\n    top: -1\n", wantErr: "bleed"},
+		{name: "negative margin", overrides: "  safety_margin:\n    top: -1\n", wantErr: "safety_margin"},
+		{name: "bad image sorting", overrides: "  images:\n    sorting: alphabetical\n", wantErr: "images.sorting"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			bookDir := writeOverrideFixture(t, "template: base.yaml\noverrides:\n"+test.overrides)
+			_, err := LoadForBook(bookDir)
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("expected error containing %q, got %v", test.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestListTemplatesAndFindProjectRoot(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "templates", "lulu"), 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	for _, name := range []string{"templates/lulu/b.yaml", "templates/a.yml", "templates/lulu/notes.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("document:\n  units: mm\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile returned error: %v", err)
+		}
+	}
+	bookDir := filepath.Join(root, "books", "demo")
+	if err := os.MkdirAll(bookDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+
+	found, err := FindProjectRoot(bookDir)
+	if err != nil {
+		t.Fatalf("FindProjectRoot returned error: %v", err)
+	}
+	if found != root {
+		t.Fatalf("expected project root %s, got %s", root, found)
+	}
+
+	refs, err := ListTemplates(root)
+	if err != nil {
+		t.Fatalf("ListTemplates returned error: %v", err)
+	}
+	if len(refs) != 2 || refs[0].Name != "a.yml" || refs[1].Name != "lulu/b.yaml" {
+		t.Fatalf("unexpected templates: %+v", refs)
+	}
+	for _, ref := range refs {
+		if _, err := ResolveTemplatePath(bookDir, ref.Name); err != nil {
+			t.Fatalf("template name %q from ListTemplates does not resolve: %v", ref.Name, err)
+		}
+	}
+
+	if refs, err := ListTemplates(t.TempDir()); err != nil || len(refs) != 0 {
+		t.Fatalf("expected no templates for empty root, got %v %v", refs, err)
+	}
+}
