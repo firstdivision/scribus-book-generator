@@ -314,6 +314,32 @@ print(json.dumps({"left": left, "right": right}))`, committedScriptPath(t))
 	}
 }
 
+func TestScribusCoverImageHandlesDPI(t *testing.T) {
+	cmd := exec.Command("python3", "-c", `import importlib.util, sys, math
+spec = importlib.util.spec_from_file_location("renderer", sys.argv[1])
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+class Scribus:
+    def __init__(self, dpi, pixels): self.dpi, self.pixels = dpi, pixels
+    def setScaleImageToFrame(self, *args): pass
+    def getImageScale(self, name):
+        return tuple(size / pixels * self.dpi / 72 for size, pixels in zip((850, 613), self.pixels))
+    def setImageScale(self, x, y, name): self.scale = x * 72 / self.dpi
+    def setImageOffset(self, x, y, name): self.offset = (x, y)
+for dpi in (72, 96, 300):
+    for pixels in ((4032, 3024), (1993, 1319), (3024, 4032)):
+        s = Scribus(dpi, pixels)
+        m._set_cover_image_to_frame(s, "photo", 850, 613)
+        for size, pixels, offset in zip((850, 613), pixels, s.offset):
+            rendered = pixels * s.scale
+            assert rendered >= size - 1e-8
+            assert math.isclose(offset, (size - rendered) / 2, abs_tol=1e-8)
+`, committedScriptPath(t))
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("cover must fill and center at every DPI: %v\n%s", err, output)
+	}
+}
+
 func TestScribusScriptGalleryCellRectsDoNotStretchShortRow(t *testing.T) {
 	cmd := exec.Command("python3", "-c", `import importlib.util, json, sys
 spec = importlib.util.spec_from_file_location("scribus_generate", sys.argv[1])

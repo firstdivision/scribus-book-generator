@@ -399,7 +399,7 @@ Book-level defaults come from template YAML, but individual images in `book.yaml
 - `placement` (`inline`, `full_page`, `ignore`, or `gallery`)
 - `bleed`
 
-`bleed: true` fills the page and its top, bottom, and outside bleed. On facing pages, the image frame stops at the trim edge on the inside so it ends exactly at the spine and cannot extend onto the facing page. Without `bleed`, full-page images are contain-fit inside the margins.
+`bleed: true` proportionally cover-fills the page and its top, bottom, and outside bleed, cropping excess image content evenly within the frame. On facing pages, the image frame stops at the trim edge on the inside so it ends exactly at the spine and cannot extend onto the facing page. Without `bleed`, full-page images are contain-fit inside the margins.
 
 `placement: ignore` keeps the file on disk and valid in `layout.images`, but the generator does not place it. Ignore wins over `bleed` and size overrides.
 

@@ -223,6 +223,21 @@ def _set_scale_image_to_frame_compat(scribus, frame_name):
 		return
 
 
+def _set_cover_image_to_frame(scribus, frame_name, width, height):
+	"""Cover a fixed clipping frame, using Scribus scales including image DPI."""
+	scribus.setScaleImageToFrame(1, 0, frame_name)
+	scale_x, scale_y = scribus.getImageScale(frame_name)
+	if scale_x <= 0 or scale_y <= 0:
+		raise RuntimeError(f"Invalid image scale for {frame_name}")
+	scale = max(scale_x, scale_y)
+	# Ratios cancel the DPI conversion in getImageScale. Offsets are points.
+	offset_x = width * (1.0 - scale / scale_x) / 2.0
+	offset_y = height * (1.0 - scale / scale_y) / 2.0
+	scribus.setScaleImageToFrame(0, 1, frame_name)
+	scribus.setImageScale(scale, scale, frame_name)
+	scribus.setImageOffset(offset_x, offset_y, frame_name)
+
+
 def _set_text_flow_mode_compat(scribus, frame_name):
 	if not hasattr(scribus, "setTextFlowMode"):
 		return
@@ -612,7 +627,8 @@ def _create_page_background_compat(scribus, page_number, layout_mode, first_page
 	if background_rgb is None:
 		return
 
-	left_bleed, right_bleed = _page_horizontal_bleeds(layout_mode, first_page_mode, page_number, bleed_inside, bleed_outside)
+	# A facing page's background must not paint over its neighbor at the spine.
+	left_bleed, right_bleed = _page_horizontal_bleeds(layout_mode, first_page_mode, page_number, 0.0, bleed_outside)
 	page_width, page_height = _document_page_size_compat(scribus, fallback_page_size)
 	color_name = _ensure_rgb_color_compat(scribus, background_rgb)
 	background_name = f"page_{page_number}_background"
@@ -1251,7 +1267,10 @@ def _place_chapter_image(scribus, image_path, image_index, chapter_index, page_n
 		f"chapter_{chapter_index}_image_{image_index}",
 	)
 	_load_image_compat(scribus, image_path, image_frame)
-	_set_scale_image_to_frame_compat(scribus, image_frame)
+	if is_full_page and image_instruction and image_instruction.get("bleed"):
+		_set_cover_image_to_frame(scribus, image_frame, frame_width, frame_height)
+	else:
+		_set_scale_image_to_frame_compat(scribus, image_frame)
 	_apply_image_frame_style_compat(scribus, image_frame, image_border_rgb_used, image_border_width_pt_used)
 	if not is_full_page:
 		_set_text_flow_mode_compat(scribus, image_frame)
@@ -1310,7 +1329,10 @@ def _place_full_page_image(scribus, image_path, image_index, chapter_index, page
 		f"chapter_{chapter_index}_image_{image_index}",
 	)
 	_load_image_compat(scribus, image_path, image_frame)
-	_set_scale_image_to_frame_compat(scribus, image_frame)
+	if image_instruction and image_instruction.get("bleed"):
+		_set_cover_image_to_frame(scribus, image_frame, frame_width, frame_height)
+	else:
+		_set_scale_image_to_frame_compat(scribus, image_frame)
 	_apply_image_frame_style_compat(scribus, image_frame, image_border_rgb_used, image_border_width_pt_used)
 	_set_text_flow_mode_compat(scribus, image_frame)
 
