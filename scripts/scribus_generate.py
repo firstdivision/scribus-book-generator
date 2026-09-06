@@ -383,7 +383,7 @@ def _choose_snap_edge(explicit_edge, allowed_edges, preferred_edges, edge_select
 	allowed_set = set(allowed_edges)
 	if explicit_edge is not None:
 		if explicit_edge not in allowed_set:
-			raise RuntimeError(f"layout.json snap_edge '{explicit_edge}' is not allowed by images.placement.allowed_edges")
+			raise RuntimeError(f"book.yaml layout snap_edge '{explicit_edge}' is not allowed by images.placement.allowed_edges")
 		return explicit_edge
 
 	preferred_allowed = [edge for edge in preferred_edges if edge in allowed_set]
@@ -1020,8 +1020,12 @@ def _image_is_ignored(image_instruction):
 	return bool(image_instruction and image_instruction.get("placement") == "ignore")
 
 
+def _image_is_gallery(image_instruction):
+	return bool(image_instruction and image_instruction.get("placement") == "gallery")
+
+
 def _image_is_full_page(image_instruction):
-	return bool(image_instruction and (image_instruction.get("placement") == "full_page" or image_instruction.get("bleed") is True))
+	return bool(image_instruction and not _image_is_gallery(image_instruction) and (image_instruction.get("placement") == "full_page" or image_instruction.get("bleed") is True))
 
 
 def _placeable_images(image_paths, layout_index, book_dir):
@@ -1417,6 +1421,8 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 	)
 	body_frames = [body_frame]
 	placeable_images = _placeable_images(image_paths, layout_index, book_dir)
+	all_placeable_images = placeable_images
+	placeable_images = [path for path in all_placeable_images if not _image_is_gallery(_resolve_image_instruction(layout_index, book_dir, path))]
 	in_flow_index = 0
 	placed_count = 0
 	current_page = start_page
@@ -1535,7 +1541,8 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 		body_frames.append(next_frame)
 		max_extra_pages -= 1
 
-	leftover_images = placeable_images[in_flow_index:]
+	placed_in_flow = set(placeable_images[:in_flow_index])
+	leftover_images = [path for path in all_placeable_images if path not in placed_in_flow]
 	leftover_full_page = []
 	gallery_images = []
 	for leftover_path in leftover_images:
@@ -1586,7 +1593,7 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 		)
 
 	single_gallery_page = len(gallery_images) == 1
-	if single_gallery_page:
+	if single_gallery_page and not _image_is_gallery(_resolve_image_instruction(layout_index, book_dir, gallery_images[0])):
 		current_page = _append_body_page_compat(scribus, current_page, "full_page_image", layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size, page_roles)
 		_goto_page_compat(scribus, current_page)
 		placed_count += 1

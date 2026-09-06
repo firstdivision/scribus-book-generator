@@ -8,6 +8,6 @@ To run the committed adapter directly after a job file exists:
 
 scribus -g -py scripts/scribus_generate.py books/sample-book books/sample-book/out/scribus-job.json
 
-Expected outputs (stem from layout.json title, or the book directory name):
+Expected outputs (stem from book.yaml layout title, or the book directory name):
 - books/sample-book/out/The Roast to San Rosario.sla
 - books/sample-book/out/The Roast to San Rosario.pdf

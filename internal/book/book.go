@@ -32,7 +32,7 @@ type Chapter struct {
 	Images   []string
 }
 
-// Load reads configuration, layout.json, chapters, and images, then validates
+// Load reads configuration and layout from book.yaml, chapters, and images, then validates
 // that layout image paths exist on disk.
 func Load(bookDir string) (Book, error) {
 	if strings.TrimSpace(bookDir) == "" {
@@ -47,7 +47,7 @@ func Load(bookDir string) (Book, error) {
 
 	plan, err := layoutplan.LoadFromBookDir(bookDir)
 	if err != nil {
-		return Book{}, fmt.Errorf("load layout.json: %w", err)
+		return Book{}, fmt.Errorf("load book.yaml layout: %w", err)
 	}
 
 	chapters, err := loadChapters(bookDir, cfg.Images.Sorting)

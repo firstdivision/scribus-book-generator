@@ -6,7 +6,7 @@ document:
 page:
   size: A4
   orientation: landscape
-  background_color_rgb: [239, 226, 205]
+  background_color_rgb: [247, 238, 213]
 
 bleed:
   top: 3.18
@@ -28,7 +28,7 @@ chapter_headings:
 
   color_rgb: [40, 40, 40]
   # Optional title-frame fill and independent solid borders.
-  background_color_rgb: [245, 235, 220]
+  # background_color_rgb: [255, 252, 238]
   borders:
     bottom: {color_rgb: [40, 40, 40], width_pt: 1}
   #   left: {color_rgb: [40, 40, 40], width_pt: 1}

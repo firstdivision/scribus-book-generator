@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	"scribus-book-generator/internal/layout/imageplacement"
 )
 
@@ -16,27 +18,28 @@ const (
 	PlacementInline   Placement = "inline"
 	PlacementFullPage Placement = "full_page"
 	PlacementIgnore   Placement = "ignore"
+	PlacementGallery  Placement = "gallery"
 )
 
 type Plan struct {
-	Title  string             `json:"title,omitempty"`
-	Images []ImageInstruction `json:"images"`
+	Title  string             `json:"title,omitempty" yaml:"title,omitempty"`
+	Images []ImageInstruction `json:"images" yaml:"images"`
 }
 
 type ImageInstruction struct {
-	Src       string    `json:"src,omitempty"`
-	File      string    `json:"file,omitempty"`
-	Placement Placement `json:"placement,omitempty"`
-	Bleed     bool      `json:"bleed,omitempty"`
-	SnapEdge  string    `json:"snap_edge,omitempty"`
-	WidthMM   *float64  `json:"width_mm,omitempty"`
-	HeightMM  *float64  `json:"height_mm,omitempty"`
-	Border    *Border   `json:"border,omitempty"`
+	Src       string    `json:"src,omitempty" yaml:"src,omitempty"`
+	File      string    `json:"file,omitempty" yaml:"file,omitempty"`
+	Placement Placement `json:"placement,omitempty" yaml:"placement,omitempty"`
+	Bleed     bool      `json:"bleed,omitempty" yaml:"bleed,omitempty"`
+	SnapEdge  string    `json:"snap_edge,omitempty" yaml:"snap_edge,omitempty"`
+	WidthMM   *float64  `json:"width_mm,omitempty" yaml:"width_mm,omitempty"`
+	HeightMM  *float64  `json:"height_mm,omitempty" yaml:"height_mm,omitempty"`
+	Border    *Border   `json:"border,omitempty" yaml:"border,omitempty"`
 }
 
 type Border struct {
-	ColorRGB []int    `json:"color_rgb,omitempty"`
-	WidthPt  *float64 `json:"width_pt,omitempty"`
+	ColorRGB []int    `json:"color_rgb,omitempty" yaml:"color_rgb,omitempty"`
+	WidthPt  *float64 `json:"width_pt,omitempty" yaml:"width_pt,omitempty"`
 }
 
 type InlineOverride struct {
@@ -46,7 +49,7 @@ type InlineOverride struct {
 }
 
 func LoadFromBookDir(bookDir string) (Plan, error) {
-	layoutPath := filepath.Join(bookDir, "layout.json")
+	layoutPath := filepath.Join(bookDir, "book.yaml")
 	data, err := os.ReadFile(layoutPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -55,11 +58,14 @@ func LoadFromBookDir(bookDir string) (Plan, error) {
 		return Plan{}, err
 	}
 
-	var plan Plan
-	if err := json.Unmarshal(data, &plan); err != nil {
+	var bookFile struct {
+		Layout Plan `yaml:"layout"`
+	}
+	if err := yaml.Unmarshal(data, &bookFile); err != nil {
 		return Plan{}, err
 	}
 
+	plan := bookFile.Layout
 	if err := plan.Validate(); err != nil {
 		return Plan{}, err
 	}
@@ -94,8 +100,8 @@ func (p Plan) Validate() error {
 				}
 			}
 		}
-		if image.Placement != "" && image.Placement != PlacementInline && image.Placement != PlacementFullPage && image.Placement != PlacementIgnore {
-			return fmt.Errorf("layout.images[%d].placement must be one of inline, full_page, ignore", i)
+		if image.Placement != "" && image.Placement != PlacementInline && image.Placement != PlacementFullPage && image.Placement != PlacementIgnore && image.Placement != PlacementGallery {
+			return fmt.Errorf("layout.images[%d].placement must be one of inline, full_page, ignore, gallery", i)
 		}
 		if strings.TrimSpace(image.SnapEdge) != "" {
 			edge := imageplacement.Edge(strings.TrimSpace(image.SnapEdge))

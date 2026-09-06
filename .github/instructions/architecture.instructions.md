@@ -1,5 +1,5 @@
 ---
-description: "Use when implementing any part of the scribus-book-generator pipeline: Scribus document generation, layout planning, layout.json schema, Markdown parsing, image handling, AI integration, configuration, or module structure. Covers architecture rules, design contracts, and incremental build strategy."
+description: "Use when implementing any part of the scribus-book-generator pipeline: Scribus document generation, layout planning, book.yaml layout schema, Markdown parsing, image handling, AI integration, configuration, or module structure. Covers architecture rules, design contracts, and incremental build strategy."
 ---
 # Copilot Instructions — AI-Assisted Book Publishing
 
@@ -15,12 +15,12 @@ The system has two distinct phases:
 The pipeline is:
 
 ```
-Markdown + images → AI analysis → layout.json → Scribus Go generator → editable .sla → manual review → press-ready PDF
+Markdown + images → AI analysis → book.yaml layout → Scribus Go generator → editable .sla → manual review → press-ready PDF
 ```
 
 ## Critical Design Rule
 
-`layout.json` is the contract between the AI system and the Scribus renderer.
+`book.yaml layout` is the contract between the AI system and the Scribus renderer.
 
 The AI may recommend layout decisions, but it must never directly construct the Scribus document.
 
@@ -28,7 +28,7 @@ The Scribus generator must operate deterministically from:
 
 - book configuration
 - Markdown
-- `layout.json`
+- `book.yaml layout`
 - image files
 
 Identical inputs should produce essentially identical Scribus documents.
@@ -67,7 +67,7 @@ The layout system should support:
 - configurable image sizing
 - optional cropping
 
-Layout instructions are stored in `layout.json`.
+Layout instructions are stored in `book.yaml layout`.
 
 Validate layout data before Scribus generation. Invalid image paths, paragraph references, dimensions, or incompatible layout instructions should produce clear errors.
 
@@ -106,7 +106,7 @@ Build incrementally. The first milestone should **not** use AI.
 First prove that:
 
 ```
-Markdown + hand-written layout.json + images → Scribus → editable .sla
+Markdown + hand-written book.yaml layout + images → Scribus → editable .sla
 ```
 
 The initial Scribus document should support:

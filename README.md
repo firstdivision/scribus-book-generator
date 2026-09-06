@@ -15,7 +15,7 @@
   - [safety_margin](#safety_margin)
   - [chapter_headings](#chapter_headings)
   - [images](#images)
-  - [layout.json](#layoutjson)
+  - [book.yaml layout](#bookyaml-layout)
   - [page_numbers](#page_numbers)
 - [Defaults](#defaults)
 - [Current Scope](#current-scope)
@@ -95,7 +95,7 @@ go run ./cmd/bookgen books/sample-book/
 
 Use `-v` to print the fully resolved configuration and the chapter inventory after the book directory is loaded.
 
-The command loads and validates the book folder (`book.yaml`, `layout.json`, chapter markdown, and image paths), writes a Scribus job JSON under `books/<book>/out/scribus-job.json`, and runs the committed adapter in `scripts/scribus_generate.py`. It then writes `.sla` and `.pdf` files under `books/<book>/out/`. The file stem is the optional `title` in `layout.json`, or the book directory name if `title` is omitted.
+The command loads and validates the book folder (`book.yaml`, chapter markdown, and image paths), writes a Scribus job JSON under `books/<book>/out/scribus-job.json`, and runs the committed adapter in `scripts/scribus_generate.py`. It then writes `.sla` and `.pdf` files under `books/<book>/out/`. The file stem is the optional `layout.title` in `book.yaml`, or the book directory name if `title` is omitted.
 
 ```bash
 go run ./cmd/bookgen -v books/sample-book/
@@ -365,44 +365,76 @@ Text wrap spacing remains separate from edge snap.
 
 - `gallery_columns`: maximum columns in the end-of-chapter leftover gallery (`>= 1`, default `2`)
 
-Gallery pages fill the content area (margins), not bleed. Spacing between cells comes from `images.spacing_mm`. When a page holds fewer images than `gallery_columns`, the grid collapses to the image count so the row stays centered with equal blank space on all sides; a lone image is promoted to a dedicated full-page (no bleed) page instead of a gallery cell. A single row that can form a more square grid is converted automatically (4 → 2x2, 6 → 2x3, 9 → 3x3) whenever the square grid does not shrink the cells.
+Gallery pages fill the content area (margins), not bleed. Spacing between cells comes from `images.spacing_mm`. When a page holds fewer images than `gallery_columns`, the grid collapses to the image count so the row stays centered with equal blank space on all sides; a lone image is promoted to a dedicated full-page (no bleed) page instead of a gallery cell unless explicitly assigned `placement: gallery`. A single row that can form a more square grid is converted automatically (4 → 2x2, 6 → 2x3, 9 → 3x3) whenever the square grid does not shrink the cells.
 
-### `layout.json`
+### `book.yaml` layout
 
-The optional top-level `title` names the generated `.sla` and `.pdf` files. If it is empty or omitted, the book directory name is used.
+The optional `layout.title` names the generated `.sla` and `.pdf` files. If it is empty or omitted, the book directory name is used.
+
+Store the layout alongside the template selection in each book's `book.yaml`:
+
+```yaml
+template: a4-landscape.yaml
+layout:
+  title: My Book
+  images:
+    - file: chapters/1-intro/photo.jpg
+      placement: full_page
+      bleed: true
+      border:
+        width_pt: 0
+```
+
+The `layout` section is optional; omitted or `null` means no image overrides. Separate `layout.json` files are no longer read. To migrate another book, copy its JSON object's `title` and `images` into `layout` in `book.yaml`, then remove the old file. Generated `out/scribus-job.json` remains an internal renderer artifact.
 
 #### Image overrides
 
-Book-level defaults come from template YAML, but individual images in `layout.json` can override:
+Each entry requires a non-empty `file` (or `src`); paths are relative to the book directory, and referenced files must exist. `file` takes precedence over `src`. Dimensions must be greater than zero. `snap_edge` accepts `outside`, `inside`, `top`, or `bottom` and must be allowed by the template when used. Optional `border.color_rgb` requires three integers from 0 through 255; `border.width_pt` must be nonnegative, with zero disabling the border.
+
+Book-level defaults come from template YAML, but individual images in `book.yaml` under `layout.images` can override:
 
 - `snap_edge`
 - `width_mm`
 - `height_mm`
-- `placement` (`inline`, `full_page`, or `ignore`)
+- `placement` (`inline`, `full_page`, `ignore`, or `gallery`)
 - `bleed`
 
 `bleed: true` places the image over the full bleed box (trim plus bleed on every side) and cover-fills the frame: the image is scaled up until it covers the whole box, and the overflowing axis is cropped evenly on both sides. Without `bleed`, full-page images are contain-fit inside the margins.
 
-`placement: ignore` keeps the file on disk and valid in `layout.json`, but the generator does not place it. Ignore wins over `bleed` and size overrides.
+`placement: ignore` keeps the file on disk and valid in `layout.images`, but the generator does not place it. Ignore wins over `bleed` and size overrides.
 
-```json
-{ "file": "chapters/1-the-road/outtake.png", "placement": "ignore" }
+```yaml
+- file: chapters/1-the-road/outtake.png
+  placement: ignore
 ```
 
 Precedence is:
 
-1. explicit `layout.json` instruction
+1. explicit `book.yaml` layout instruction
 2. YAML image defaults
 3. built-in defaults
 
 If both `width_mm` and `height_mm` are set for an image, they are treated as a contain-fit bounding box (still preserving aspect ratio).
+
+#### Force an image into the leftovers gallery
+
+Set `placement: gallery` on an image in `book.yaml`:
+
+```yaml
+layout:
+  images:
+    - file: chapters/1-intro/photo.jpg
+      placement: gallery
+```
+
+The image skips all body-text pages and joins the end-of-chapter leftovers gallery, preserving the configured image order among gallery images. Even a single explicitly assigned gallery image stays on a gallery page. Gallery placement takes precedence over `bleed: true`; gallery cells use contain-fit inside the margins, with the template's gallery columns and spacing. Per-image borders still apply; inline dimensions and snap edges do not apply to gallery cells. Omitted placement retains the existing automatic behavior.
 
 #### Leftover images
 
 In-flow images are placed one per page only while body text still overflows. After the text chain fits (or images run out):
 
 - leftover images with `placement: full_page` or `bleed: true` each get a dedicated page, in leftover order, before the gallery
-- a single remaining leftover is treated as `full_page` without bleed (contain-fit and centered inside the margins)
+- a single remaining leftover without `placement: gallery` is treated as `full_page` without bleed (contain-fit and centered inside the margins)
 - remaining leftovers pack into an end-of-chapter gallery (page role `chapter_gallery`)
 
 If every leftover is full-page, there is no gallery. Gallery pages center the occupied cells vertically and horizontally: the last page may hold a short row, and the grid adapts its column count so the row is centered rather than stretched. Single-row results that factor into a square-like grid (2x2, 2x3, 3x3, …) are converted automatically; on height-constrained pages the single row is kept when it would yield larger cells.

@@ -13,7 +13,7 @@ import (
 )
 
 // scribusJob is the JSON payload written for scripts/scribus_generate.py.
-// Go owns book config and layout.json; the Python adapter only applies this job
+// Go owns book config and book.yaml layout; the Python adapter only applies this job
 // inside Scribus. Lengths are in PostScript points because that is what the
 // Scribus API uses.
 type scribusJob struct {
@@ -22,7 +22,7 @@ type scribusJob struct {
 	PageNumbers     scribusJobPageNumbers     `json:"page_numbers"`
 	ChapterHeadings scribusJobChapterHeadings `json:"chapter_headings"`
 	Images          scribusJobImages          `json:"images"`
-	// Layout is the layout.json object (title plus per-image overrides).
+	// Layout is the book.yaml layout object (title plus per-image overrides).
 	Layout json.RawMessage `json:"layout"`
 }
 
@@ -83,7 +83,7 @@ type scribusJobChapterHeadings struct {
 }
 
 // scribusJobImages is template defaults for frames: border, wrap inset, contain
-// fit, and which edges images may snap to. layout.json can override per file.
+// fit, and which edges images may snap to. book.yaml layout can override per file.
 type scribusJobImages struct {
 	BorderRGB       [3]int          `json:"border_rgb"`
 	BorderWidthPt   float64         `json:"border_width_pt"`

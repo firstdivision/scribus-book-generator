@@ -72,7 +72,7 @@ func TestLoadRequiresMarkdownInEachChapter(t *testing.T) {
 func TestLoadRejectsMissingLayoutImage(t *testing.T) {
 	dir := writeMiniBook(t)
 	layout := `{"images":[{"file":"chapters/1-intro/missing.png"}]}`
-	if err := os.WriteFile(filepath.Join(dir, "layout.json"), []byte(layout), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "book.yaml"), []byte("layout: "+layout), 0o644); err != nil {
 		t.Fatalf("write layout: %v", err)
 	}
 	if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), "layout.images[0]: file not found") {

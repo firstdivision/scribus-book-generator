@@ -537,3 +537,44 @@ func TestGenerateRequiresBookDirectory(t *testing.T) {
 		t.Fatal("expected error for empty book directory")
 	}
 }
+
+func TestScribusScriptForcesGalleryPlacement(t *testing.T) {
+	cmd := exec.Command("python3", "-c", `import importlib.util, inspect, pathlib, sys
+spec = importlib.util.spec_from_file_location("renderer", sys.argv[1])
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+for name in ("_decorate_chapter_heading", "_set_frame_text_compat", "_set_paragraph_style_compat", "_goto_page_compat", "_link_text_frames_compat"):
+    setattr(m, name, lambda *a, **k: None)
+m._document_page_size_compat = lambda *a: (600, 800)
+m._create_text_frame_compat = lambda *a: a[-1]
+m._append_body_page_compat = lambda *a: a[1] + 1
+root = pathlib.Path("/book")
+forced, inline, auto, ignored = [root / name for name in ("forced.jpg", "inline.jpg", "auto.jpg", "ignored.jpg")]
+for paths, overflow, expected_flow, expected_gallery, expected_full in [
+    ([forced], False, [], [forced], []),
+    ([forced, inline, auto, ignored], False, [inline], [forced, auto], []),
+    ([forced, inline, auto, ignored], True, [inline, auto], [forced], []),
+    ([inline, auto], False, [inline], [], [auto]),
+]:
+    flow, gallery, full = [], [], []
+    m._text_overflows_compat = lambda *a: overflow
+    m._place_chapter_image = lambda *a, **k: flow.append(a[1])
+    m._place_full_page_image = lambda *a: full.append(a[1])
+    def place_gallery(*a):
+        gallery.extend(a[1])
+        return a[4], a[2] + len(a[1])
+    m._place_gallery_pages = place_gallery
+    args = {name: 0 for name in inspect.signature(m._render_basic_content).parameters}
+    args.update(scribus=object(), image_paths=paths, book_dir=root,
+        page_size=(600, 800), margins=(20, 20, 20, 20),
+        layout_mode="single_page", first_page_mode="right", chapter_heading_alignment="left",
+        chapter_heading_decoration={}, page_roles={},
+        layout_index={"forced.jpg": {"placement": "gallery", "bleed": True},
+                      "ignored.jpg": {"placement": "ignore"}})
+    m._render_basic_content(**args)
+    assert (flow, gallery, full) == (expected_flow, expected_gallery, expected_full), (flow, gallery, full)
+`, committedScriptPath(t))
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("gallery routing failed: %v\n%s", err, output)
+	}
+}
