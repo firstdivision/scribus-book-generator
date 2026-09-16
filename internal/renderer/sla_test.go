@@ -109,7 +109,7 @@ func TestCommittedScribusScriptContainsRendererHelpers(t *testing.T) {
 		"border_override = image_instruction.get(\"border\")",
 		"def _fonts_used_in_document_compat",
 		"def _configure_pdf_export_compat",
-		"pdf.fontEmbedding = 0",
+		"pdf.fontEmbedding = getattr(scribus, \"EmbedFonts\", 0)",
 		"pdf.fonts = sorted(font_name for font_name in fonts if font_name)",
 		"def _load_job",
 		"job = _load_job(job_path)",

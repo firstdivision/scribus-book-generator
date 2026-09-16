@@ -94,7 +94,7 @@ def _fonts_used_in_document_compat(scribus):
 
 def _configure_pdf_export_compat(scribus, pdf, required_fonts=None):
 	if hasattr(pdf, "fontEmbedding"):
-		pdf.fontEmbedding = 0
+		pdf.fontEmbedding = getattr(scribus, "EmbedFonts", 0)
 	fonts = set(required_fonts or [])
 	fonts.update(_fonts_used_in_document_compat(scribus))
 	if hasattr(pdf, "fonts"):

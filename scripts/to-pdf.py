@@ -51,7 +51,7 @@ def _fonts_used_in_document():
 
 def _configure_pdf_export(pdf):
     if hasattr(pdf, "fontEmbedding"):
-        pdf.fontEmbedding = 0
+        pdf.fontEmbedding = getattr(scribus, "EmbedFonts", 0)
     if hasattr(pdf, "fonts"):
         pdf.fonts = sorted(_fonts_used_in_document())
 
