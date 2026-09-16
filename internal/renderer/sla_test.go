@@ -242,6 +242,7 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 class PDF:
     def __init__(self):
+        self.version = 13
         self.fontEmbedding = None
         self.fonts = []
 class Scribus:
@@ -265,12 +266,13 @@ class Scribus:
 s = Scribus()
 pdf = PDF()
 module._configure_pdf_export_compat(s, pdf, required_fonts=["URW Bookman Demi", "Source Serif 4 Regular", ""])
-print(json.dumps({"fontEmbedding": pdf.fontEmbedding, "fonts": pdf.fonts}))`, committedScriptPath(t))
+print(json.dumps({"version": pdf.version, "fontEmbedding": pdf.fontEmbedding, "fonts": pdf.fonts}))`, committedScriptPath(t))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("failed to execute pdf export helper: %v\n%s", err, output)
 	}
 	var parsed struct {
+		Version       int      `json:"version"`
 		FontEmbedding int      `json:"fontEmbedding"`
 		Fonts         []string `json:"fonts"`
 	}
@@ -280,6 +282,9 @@ print(json.dumps({"fontEmbedding": pdf.fontEmbedding, "fonts": pdf.fonts}))`, co
 	if parsed.FontEmbedding != 7 {
 		t.Fatalf("expected Scribus embed-font mode, got %d", parsed.FontEmbedding)
 	}
+	if parsed.Version != 14 {
+		t.Fatalf("expected PDF 1.4 to preserve transparency before flattening, got %d", parsed.Version)
+	}
 	want := []string{"Liberation Serif Regular", "Source Serif 4 Regular", "URW Bookman Demi"}
 	if len(parsed.Fonts) != len(want) {
 		t.Fatalf("expected %d embedded fonts, got %d (%v)", len(want), len(parsed.Fonts), parsed.Fonts)
@@ -288,6 +293,30 @@ print(json.dumps({"fontEmbedding": pdf.fontEmbedding, "fonts": pdf.fonts}))`, co
 		if parsed.Fonts[i] != want[i] {
 			t.Fatalf("font %d: expected %q, got %q", i, want[i], parsed.Fonts[i])
 		}
+	}
+}
+
+func TestStandalonePDFExportPreservesTransparencyAndFonts(t *testing.T) {
+	script := filepath.Join(filepath.Dir(committedScriptPath(t)), "to-pdf.py")
+	cmd := exec.Command("python3", "-c", `import ast, pathlib, sys, types
+tree = ast.parse(pathlib.Path(sys.argv[1]).read_text())
+tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef)]
+scribus = types.SimpleNamespace(EmbedFonts=7)
+namespace = {"scribus": scribus}
+exec(compile(tree, sys.argv[1], "exec"), namespace)
+namespace["_fonts_used_in_document"] = lambda: {"Example Regular"}
+pdf = types.SimpleNamespace(version=13, fontEmbedding=None, fonts=[])
+namespace["_configure_pdf_export"](pdf)
+assert pdf.version == 14
+assert pdf.fontEmbedding == 7
+assert pdf.fonts == ["Example Regular"]
+del scribus.EmbedFonts
+pdf.fontEmbedding = None
+namespace["_configure_pdf_export"](pdf)
+assert pdf.fontEmbedding is None
+`, script)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("standalone PDF configuration: %v\n%s", err, output)
 	}
 }
 

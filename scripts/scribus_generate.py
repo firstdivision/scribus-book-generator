@@ -93,6 +93,8 @@ def _fonts_used_in_document_compat(scribus):
 
 
 def _configure_pdf_export_compat(scribus, pdf, required_fonts=None):
+	# Keep transparency for appearance-preserving flattening by printpdf.
+	pdf.version = 14
 	embed_font_mode = getattr(scribus, "EmbedFonts", None)
 	if hasattr(pdf, "fontEmbedding") and embed_font_mode is not None:
 		pdf.fontEmbedding = embed_font_mode

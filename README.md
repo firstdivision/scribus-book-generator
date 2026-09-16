@@ -6,6 +6,7 @@
 - [Book Structure](#book-structure)
   - [Chapter Markdown](#chapter-markdown)
 - [Running The Generator](#running-the-generator)
+  - [Preparing A Lulu Print PDF](#preparing-a-lulu-print-pdf)
   - [Converting HEIC Images](#converting-heic-images)
 - [Desktop GUI](#desktop-gui)
 - [Creating A Template](#creating-a-template)
@@ -102,6 +103,49 @@ The command loads and validates the book folder (`book.yaml`, chapter markdown, 
 ```bash
 go run ./cmd/bookgen -v books/sample-book/
 ```
+
+### Preparing A Lulu Print PDF
+
+The normal generator and `scripts/to-pdf.py` export PDF 1.4 with embedded fonts,
+preserving transparency for review. **These PDFs are not flattened for Lulu.**
+After reviewing the editable `.sla` and re-exporting any manual changes, create a
+separate print copy to meet Lulu's requirement to flatten transparent layers and
+vector objects:
+
+```bash
+sudo apt install ghostscript
+go run ./cmd/printpdf "books/puerto-pico/out/Puerto Pico.pdf"
+```
+
+Use the actual exported PDF filename. Upload the resulting `*-print.pdf` to Lulu,
+not the original PDF. This command also works on an existing exported PDF without
+regenerating the book or launching Scribus.
+
+- Ghostscript (`gs` on `PATH`, with the `pdfimage24` device) is required only for
+  this print step. Keep Ghostscript updated when processing PDFs.
+- Every page's rendered appearance is composited into an **opaque RGB image**,
+  flattening transparency, layers, and **all vectors, including text**. The PDF
+  has no live transparency or font dependencies. This is actual rasterization,
+  not merely changing the PDF version or discarding opacity.
+- `-dpi` sets raster resolution: **300 by default**, integer values **300–1200**.
+  Use `-dpi 600` for finer text/line art; higher values increase memory use and
+  file size. Images use lossless Flate compression.
+- `-o <path.pdf>` selects a different output path; the default is
+  `<input-stem>-print.pdf`. The output directory must exist. Existing files
+  (including the source PDF) are never overwritten, and a failed conversion does
+  not publish a partial print PDF.
+- The original PDF and editable `.sla` remain unchanged. Rasterized text is no
+  longer searchable/selectable, and RGB conversion can change colors.
+- Pages are rendered at their full source MediaBox size (including any bleed
+  already present), rounded to the raster pixel grid. This does **not** add
+  missing bleed, preserve separate trim/bleed box metadata, or certify PDF/X or
+  other Lulu requirements.
+
+Inspect the print copy, especially pages 1–3 of Puerto Pico, for transparency
+appearance, text sharpness, page size, bleed, and color before uploading. Merely
+exporting PDF 1.3 from Scribus can discard transparency effects instead of
+flattening them correctly. Flattening cannot restore effects already lost in a
+source PDF. See [Lulu's PDF creation guidelines](https://help.lulu.com/en/support/solutions/articles/64000255519).
 
 ### Converting HEIC Images
 
