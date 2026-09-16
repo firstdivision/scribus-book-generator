@@ -109,7 +109,8 @@ func TestCommittedScribusScriptContainsRendererHelpers(t *testing.T) {
 		"border_override = image_instruction.get(\"border\")",
 		"def _fonts_used_in_document_compat",
 		"def _configure_pdf_export_compat",
-		"pdf.fontEmbedding = getattr(scribus, \"EmbedFonts\", 0)",
+		"embed_font_mode = getattr(scribus, \"EmbedFonts\", None)",
+		"if hasattr(pdf, \"fontEmbedding\") and embed_font_mode is not None:",
 		"pdf.fonts = sorted(font_name for font_name in fonts if font_name)",
 		"def _load_job",
 		"job = _load_job(job_path)",
@@ -244,6 +245,7 @@ class PDF:
         self.fontEmbedding = None
         self.fonts = []
 class Scribus:
+    EmbedFonts = 7
     def getAllObjects(self):
         return ["title", "art", "body", "folio"]
     def getObjectType(self, name):
@@ -275,8 +277,8 @@ print(json.dumps({"fontEmbedding": pdf.fontEmbedding, "fonts": pdf.fonts}))`, co
 	if err := json.Unmarshal(output, &parsed); err != nil {
 		t.Fatalf("decode pdf export helper output %q: %v", output, err)
 	}
-	if parsed.FontEmbedding != 0 {
-		t.Fatalf("expected embedded-font export mode, got %d", parsed.FontEmbedding)
+	if parsed.FontEmbedding != 7 {
+		t.Fatalf("expected Scribus embed-font mode, got %d", parsed.FontEmbedding)
 	}
 	want := []string{"Liberation Serif Regular", "Source Serif 4 Regular", "URW Bookman Demi"}
 	if len(parsed.Fonts) != len(want) {
