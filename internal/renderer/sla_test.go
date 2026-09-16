@@ -107,6 +107,11 @@ func TestCommittedScribusScriptContainsRendererHelpers(t *testing.T) {
 		"def _estimate_body_pages",
 		"def _resolve_border_override",
 		"border_override = image_instruction.get(\"border\")",
+		"def _fonts_used_in_document_compat",
+		"def _configure_pdf_export_compat",
+		"embed_font_mode = getattr(scribus, \"EmbedFonts\", None)",
+		"if hasattr(pdf, \"fontEmbedding\") and embed_font_mode is not None:",
+		"pdf.fonts = sorted(font_name for font_name in fonts if font_name)",
 		"def _load_job",
 		"job = _load_job(job_path)",
 		"gallery_columns = images.get(\"gallery_columns\") or 2",
@@ -227,6 +232,62 @@ func TestWriteScribusJobIncludesLayoutBorderOverride(t *testing.T) {
 	}
 	if !strings.Contains(string(content), `"width_pt": 0`) && !strings.Contains(string(content), `"width_pt":0`) {
 		t.Fatalf("job missing width_pt override: %s", content)
+	}
+}
+
+func TestScribusScriptConfiguresPDFExportToEmbedUsedFonts(t *testing.T) {
+	cmd := exec.Command("python3", "-c", `import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("scribus_generate", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+class PDF:
+    def __init__(self):
+        self.fontEmbedding = None
+        self.fonts = []
+class Scribus:
+    EmbedFonts = 7
+    def getAllObjects(self):
+        return ["title", "art", "body", "folio"]
+    def getObjectType(self, name):
+        return {"title": "TextFrame", "art": "ImageFrame", "body": "TextFrame", "folio": "TextFrame"}[name]
+    def getTextLength(self, name):
+        return {"title": 2, "body": 0, "folio": 1}[name]
+    def getFont(self, *args):
+        if len(args) == 2:
+            name, index = args
+            return {
+                ("title", 0): "URW Bookman Demi",
+                ("title", 1): "URW Bookman Demi",
+                ("folio", 0): "Source Serif 4 Regular",
+            }[(name, index)]
+        (name,) = args
+        return {"body": "Liberation Serif Regular"}[name]
+s = Scribus()
+pdf = PDF()
+module._configure_pdf_export_compat(s, pdf, required_fonts=["URW Bookman Demi", "Source Serif 4 Regular", ""])
+print(json.dumps({"fontEmbedding": pdf.fontEmbedding, "fonts": pdf.fonts}))`, committedScriptPath(t))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to execute pdf export helper: %v\n%s", err, output)
+	}
+	var parsed struct {
+		FontEmbedding int      `json:"fontEmbedding"`
+		Fonts         []string `json:"fonts"`
+	}
+	if err := json.Unmarshal(output, &parsed); err != nil {
+		t.Fatalf("decode pdf export helper output %q: %v", output, err)
+	}
+	if parsed.FontEmbedding != 7 {
+		t.Fatalf("expected Scribus embed-font mode, got %d", parsed.FontEmbedding)
+	}
+	want := []string{"Liberation Serif Regular", "Source Serif 4 Regular", "URW Bookman Demi"}
+	if len(parsed.Fonts) != len(want) {
+		t.Fatalf("expected %d embedded fonts, got %d (%v)", len(want), len(parsed.Fonts), parsed.Fonts)
+	}
+	for i := range want {
+		if parsed.Fonts[i] != want[i] {
+			t.Fatalf("font %d: expected %q, got %q", i, want[i], parsed.Fonts[i])
+		}
 	}
 }
 

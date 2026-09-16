@@ -97,7 +97,7 @@ go run ./cmd/bookgen books/sample-book/
 
 Use `-v` to print the fully resolved configuration and the chapter inventory after the book directory is loaded.
 
-The command loads and validates the book folder (`book.yaml`, chapter markdown, and image paths), writes a Scribus job JSON under `books/<book>/out/scribus-job.json`, and runs the committed adapter in `scripts/scribus_generate.py`. It then writes `.sla` and `.pdf` files under `books/<book>/out/`. The file stem is the optional `layout.title` in `book.yaml`, or the book directory name if `title` is omitted.
+The command loads and validates the book folder (`book.yaml`, chapter markdown, and image paths), writes a Scribus job JSON under `books/<book>/out/scribus-job.json`, and runs the committed adapter in `scripts/scribus_generate.py`. It then writes `.sla` and `.pdf` files under `books/<book>/out/`. The file stem is the optional `layout.title` in `book.yaml`, or the book directory name if `title` is omitted. PDF export explicitly enables embedded fonts and populates the export font list from the fonts used in the Scribus document so printers receive the required font data.
 
 ```bash
 go run ./cmd/bookgen -v books/sample-book/
