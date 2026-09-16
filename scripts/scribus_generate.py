@@ -1955,7 +1955,6 @@ def main() -> int:
 				pdf,
 				required_fonts=[
 					chapter_heading_font_name,
-					headings.get("font_family"),
 					page_number_font_name,
 					page_number_font_family,
 				],
