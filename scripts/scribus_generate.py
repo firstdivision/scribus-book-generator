@@ -46,6 +46,61 @@ def _save_document_compat(scribus, output_path: Path) -> None:
 	raise RuntimeError("Scribus save API is unavailable in this build")
 
 
+def _fonts_used_in_document_compat(scribus):
+	fonts = set()
+	if not hasattr(scribus, "getAllObjects") or not hasattr(scribus, "getObjectType") or not hasattr(scribus, "getFont"):
+		return fonts
+
+	try:
+		object_names = scribus.getAllObjects()
+	except Exception:
+		return fonts
+
+	for object_name in object_names:
+		try:
+			if scribus.getObjectType(object_name) != "TextFrame":
+				continue
+		except Exception:
+			continue
+
+		try:
+			text_length = scribus.getTextLength(object_name) if hasattr(scribus, "getTextLength") else 0
+		except Exception:
+			text_length = 0
+
+		if text_length > 0:
+			for index in range(text_length):
+				try:
+					font_name = scribus.getFont(index, object_name)
+				except TypeError:
+					try:
+						font_name = scribus.getFont(object_name)
+					except Exception:
+						font_name = ""
+				except Exception:
+					font_name = ""
+				if font_name:
+					fonts.add(font_name)
+		else:
+			try:
+				font_name = scribus.getFont(object_name)
+			except Exception:
+				font_name = ""
+			if font_name:
+				fonts.add(font_name)
+
+	return fonts
+
+
+def _configure_pdf_export_compat(scribus, pdf, required_fonts=None):
+	if hasattr(pdf, "fontEmbedding"):
+		pdf.fontEmbedding = 0
+	fonts = set(required_fonts or [])
+	fonts.update(_fonts_used_in_document_compat(scribus))
+	if hasattr(pdf, "fonts"):
+		pdf.fonts = sorted(font_name for font_name in fonts if font_name)
+
+
 def _chapter_directories(chapters_dir: Path):
 	return sorted([entry for entry in chapters_dir.iterdir() if entry.is_dir()])
 
@@ -1895,6 +1950,16 @@ def main() -> int:
 			print(f"exporting PDF to {pdf_path}")
 			pdf = scribus.PDFfile()
 			pdf.file = str(pdf_path)
+			_configure_pdf_export_compat(
+				scribus,
+				pdf,
+				required_fonts=[
+					chapter_heading_font_name,
+					headings.get("font_family"),
+					page_number_font_name,
+					page_number_font_family,
+				],
+			)
 			pdf.save()
 		else:
 			print("Scribus PDF export API is unavailable in this build.", file=sys.stderr)
