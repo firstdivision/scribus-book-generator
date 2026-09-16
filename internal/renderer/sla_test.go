@@ -252,7 +252,7 @@ class Scribus:
         return {"title": 2, "body": 0, "folio": 1}[name]
     def getFont(self, *args):
         if len(args) == 2:
-            index, name = args
+            name, index = args
             return {
                 ("title", 0): "URW Bookman Demi",
                 ("title", 1): "URW Bookman Demi",

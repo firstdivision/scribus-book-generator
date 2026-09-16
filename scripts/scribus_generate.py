@@ -71,7 +71,7 @@ def _fonts_used_in_document_compat(scribus):
 		if text_length > 0:
 			for index in range(text_length):
 				try:
-					font_name = scribus.getFont(index, object_name)
+					font_name = scribus.getFont(object_name, index)
 				except TypeError:
 					try:
 						font_name = scribus.getFont(object_name)
