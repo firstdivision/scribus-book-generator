@@ -109,9 +109,9 @@ func TestCommittedScribusScriptContainsRendererHelpers(t *testing.T) {
 		"border_override = image_instruction.get(\"border\")",
 		"def _fonts_used_in_document_compat",
 		"def _configure_pdf_export_compat",
-		"embed_font_mode = getattr(scribus, \"EmbedFonts\", None)",
-		"if hasattr(pdf, \"fontEmbedding\") and embed_font_mode is not None:",
-		"pdf.fonts = sorted(font_name for font_name in fonts if font_name)",
+		"pdf.fontEmbedding = PDF_FONT_EMBEDDING_EMBED",
+		"_require_embeddable_fonts_compat(scribus, fonts)",
+		"pdf.fonts = sorted(fonts)",
 		"def _load_job",
 		"job = _load_job(job_path)",
 		"gallery_columns = images.get(\"gallery_columns\") or 2",
@@ -242,10 +242,12 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 class PDF:
     def __init__(self):
+        self.version = None
+        self.useLayers = True
         self.fontEmbedding = None
         self.fonts = []
 class Scribus:
-    EmbedFonts = 7
+    PDF_13 = 13
     def getAllObjects(self):
         return ["title", "art", "body", "folio"]
     def getObjectType(self, name):
@@ -265,20 +267,28 @@ class Scribus:
 s = Scribus()
 pdf = PDF()
 module._configure_pdf_export_compat(s, pdf, required_fonts=["URW Bookman Demi", "Source Serif 4 Regular", ""])
-print(json.dumps({"fontEmbedding": pdf.fontEmbedding, "fonts": pdf.fonts}))`, committedScriptPath(t))
+print(json.dumps({"version": pdf.version, "useLayers": pdf.useLayers, "fontEmbedding": pdf.fontEmbedding, "fonts": pdf.fonts}))`, committedScriptPath(t))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("failed to execute pdf export helper: %v\n%s", err, output)
 	}
 	var parsed struct {
+		Version       int      `json:"version"`
+		UseLayers     bool     `json:"useLayers"`
 		FontEmbedding int      `json:"fontEmbedding"`
 		Fonts         []string `json:"fonts"`
 	}
 	if err := json.Unmarshal(output, &parsed); err != nil {
 		t.Fatalf("decode pdf export helper output %q: %v", output, err)
 	}
-	if parsed.FontEmbedding != 7 {
-		t.Fatalf("expected Scribus embed-font mode, got %d", parsed.FontEmbedding)
+	if parsed.Version != 13 {
+		t.Fatalf("expected PDF 1.3 export for flattened transparency, got %d", parsed.Version)
+	}
+	if parsed.UseLayers {
+		t.Fatal("expected PDF export to disable layers")
+	}
+	if parsed.FontEmbedding != 0 {
+		t.Fatalf("expected Scribus embed-font mode 0, got %d", parsed.FontEmbedding)
 	}
 	want := []string{"Liberation Serif Regular", "Source Serif 4 Regular", "URW Bookman Demi"}
 	if len(parsed.Fonts) != len(want) {

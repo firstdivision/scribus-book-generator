@@ -65,8 +65,14 @@ func GenerateFromBookWithOptions(loaded book.Book, opts Options) (Result, error)
 		return Result{}, fmt.Errorf("write Scribus job: %w", err)
 	}
 
+	env, cleanupFonts, err := scribusFontEnvironment(opts.Stderr)
+	if err != nil {
+		return Result{}, err
+	}
+	defer cleanupFonts()
+
 	cmd := buildScribusInvocation(loaded.Dir, jobPath, opts.RootDir)
-	if err := runCommand(cmd, opts.Stdout, opts.Stderr); err != nil {
+	if err := runCommand(cmd, env, opts.Stdout, opts.Stderr); err != nil {
 		return Result{}, err
 	}
 
@@ -104,12 +110,35 @@ func buildScribusInvocation(bookDir, jobPath, rootDir string) []string {
 	return []string{"xvfb-run", "-a", "scribus", "-g", "-py", script, bookDir, jobPath}
 }
 
-func runCommand(cmd []string, stdout, stderr io.Writer) error {
+// runCommand runs cmd; a nil env inherits the current process environment.
+func runCommand(cmd []string, env []string, stdout, stderr io.Writer) error {
 	command := exec.Command(cmd[0], cmd[1:]...)
+	command.Env = env
 	command.Stdout = stdout
 	command.Stderr = stderr
 	if err := command.Run(); err != nil {
 		return fmt.Errorf("run %s: %w", strings.Join(cmd, " "), err)
 	}
+	return nil
+}
+
+// OpenInScribus launches interactive Scribus on slaPath with the same font
+// environment used during generation, so PDFs exported after manual review
+// embed the same usable font files.
+func OpenInScribus(slaPath string, stderr io.Writer) error {
+	env, cleanup, err := scribusFontEnvironment(stderr)
+	if err != nil {
+		return err
+	}
+	command := exec.Command("scribus", slaPath)
+	command.Env = env
+	if err := command.Start(); err != nil {
+		cleanup()
+		return fmt.Errorf("launch scribus: %w", err)
+	}
+	go func() {
+		_ = command.Wait()
+		cleanup()
+	}()
 	return nil
 }

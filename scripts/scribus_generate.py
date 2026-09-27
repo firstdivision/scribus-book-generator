@@ -92,14 +92,72 @@ def _fonts_used_in_document_compat(scribus):
 	return fonts
 
 
+# Scribus PDFOptions::EmbedFonts; the scripter exposes no named constant for fontEmbedding.
+PDF_FONT_EMBEDDING_EMBED = 0
+
+
+def _type1_file_has_binary_eexec(font_path):
+	"""Scribus hex-decodes the eexec section of every '%!' Type 1 file, corrupting binary eexec data."""
+	try:
+		with open(font_path, "rb") as handle:
+			data = handle.read(1 << 20)
+	except OSError:
+		return False
+	if not data.startswith(b"%!"):
+		return False
+	marker = data.find(b"eexec")
+	if marker < 0:
+		return False
+	payload = data[marker + len(b"eexec"):].lstrip(b" \t\r\n")
+	if not payload:
+		return False
+	# Adobe Type 1 spec: the eexec section is hex only if its first four bytes are all hex digits.
+	return any(byte not in b"0123456789abcdefABCDEF" for byte in payload[:4])
+
+
+def _font_files_compat(scribus):
+	if not hasattr(scribus, "getXFontNames"):
+		return {}
+	try:
+		rows = scribus.getXFontNames()
+	except Exception:
+		return {}
+	files = {}
+	for row in rows:
+		if len(row) >= 6 and row[0] and row[5]:
+			files[row[0]] = row[5]
+	return files
+
+
+def _require_embeddable_fonts_compat(scribus, font_names):
+	font_files = _font_files_compat(scribus)
+	broken = [
+		f"'{font_name}' ({font_files[font_name]})"
+		for font_name in sorted(font_names)
+		if font_name in font_files and _type1_file_has_binary_eexec(font_files[font_name])
+	]
+	if broken:
+		raise RuntimeError(
+			"Scribus cannot embed these Type 1 fonts because their files store eexec data in binary, "
+			"which would produce a corrupt embedded font that printers reject: "
+			+ ", ".join(broken)
+			+ ". Install an OpenType, TrueType, or .pfb copy of the font, or choose a different font."
+		)
+
+
 def _configure_pdf_export_compat(scribus, pdf, required_fonts=None):
-	embed_font_mode = getattr(scribus, "EmbedFonts", None)
-	if hasattr(pdf, "fontEmbedding") and embed_font_mode is not None:
-		pdf.fontEmbedding = embed_font_mode
+	if hasattr(pdf, "version"):
+		pdf.version = getattr(scribus, "PDF_13", 13)
+	if hasattr(pdf, "useLayers"):
+		pdf.useLayers = False
+	if hasattr(pdf, "fontEmbedding"):
+		pdf.fontEmbedding = PDF_FONT_EMBEDDING_EMBED
 	fonts = set(required_fonts or [])
 	fonts.update(_fonts_used_in_document_compat(scribus))
+	fonts.discard("")
+	_require_embeddable_fonts_compat(scribus, fonts)
 	if hasattr(pdf, "fonts"):
-		pdf.fonts = sorted(font_name for font_name in fonts if font_name)
+		pdf.fonts = sorted(fonts)
 
 
 def _chapter_directories(chapters_dir: Path):

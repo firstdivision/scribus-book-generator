@@ -2,7 +2,6 @@ package gui
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 	"sync"
 
@@ -149,7 +148,7 @@ func (t *generateTab) openInScribus() {
 	if t.result.SLAPath == "" {
 		return
 	}
-	if err := exec.Command("scribus", t.result.SLAPath).Start(); err != nil {
-		dialog.ShowError(fmt.Errorf("launch scribus: %w", err), t.window)
+	if err := renderer.OpenInScribus(t.result.SLAPath, logWriter{tab: t}); err != nil {
+		dialog.ShowError(err, t.window)
 	}
 }
