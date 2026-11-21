@@ -32,6 +32,7 @@ type Config struct {
 	BleedInside       float64
 	BleedOutside      float64
 	ChapterHeadings   chapterheadings.Settings
+	Callouts          CalloutSettings
 	Images            ImageDefaults
 }
 
@@ -50,6 +51,7 @@ func Default() Config {
 		PageOrientation: "portrait",
 		PageNumbers:     pagenumbering.DefaultSettings(),
 		ChapterHeadings: chapterheadings.DefaultSettings(),
+		Callouts:        defaultCalloutSettings(),
 		Images:          DefaultImageDefaults(),
 	}
 }
@@ -68,6 +70,7 @@ type TemplateFile struct {
 	Bleed           SidesTemplate          `yaml:"bleed,omitempty"`
 	SafetyMargin    SidesTemplate          `yaml:"safety_margin,omitempty"`
 	ChapterHeadings ChapterHeadingTemplate `yaml:"chapter_headings,omitempty"`
+	Callouts        CalloutTemplate        `yaml:"callouts,omitempty"`
 	Images          ImageTemplate          `yaml:"images,omitempty"`
 	PageNumbers     PageNumberTemplate     `yaml:"page_numbers,omitempty"`
 }
@@ -217,6 +220,10 @@ func ApplyTemplate(cfg Config, templateFile TemplateFile) (Config, error) {
 	}
 	cfg.PageNumbers = pageNumbers
 	cfg.ChapterHeadings, err = parseChapterHeadingSettings(templateFile.ChapterHeadings, cfg.ChapterHeadings)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Callouts, err = parseCalloutSettings(templateFile.Callouts, cfg.Callouts)
 	if err != nil {
 		return cfg, err
 	}

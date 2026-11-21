@@ -38,6 +38,18 @@ func TestLoadRequiresBookDirectory(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsCallouts(t *testing.T) {
+	dir := writeMiniBook(t)
+	path := filepath.Join(dir, "chapters", "1-intro", "text.md")
+	if err := os.WriteFile(path, []byte("# Title\n\n```callout\nText\n```\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(dir)
+	if err != nil || len(loaded.Chapters) != 1 || loaded.Chapters[0].Title != "Title" {
+		t.Fatalf("unexpected result: %#v, %v", loaded, err)
+	}
+}
+
 func TestLoadRequiresChaptersDirectory(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), "chapters directory not found") {

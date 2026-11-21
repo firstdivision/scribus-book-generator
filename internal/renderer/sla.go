@@ -71,9 +71,33 @@ func GenerateFromBookWithOptions(loaded book.Book, opts Options) (Result, error)
 	}
 	defer cleanupFonts()
 
+	status, err := os.CreateTemp("", "bookgen-scribus-status-*")
+	if err != nil {
+		return Result{}, fmt.Errorf("create Scribus status file: %w", err)
+	}
+	statusPath := status.Name()
+	defer os.Remove(statusPath)
+	if err := status.Close(); err != nil {
+		return Result{}, fmt.Errorf("close Scribus status file: %w", err)
+	}
+	if env == nil {
+		env = os.Environ()
+	}
+	env = append(env, "BOOKGEN_SCRIBUS_STATUS="+statusPath)
 	cmd := buildScribusInvocation(loaded.Dir, jobPath, opts.RootDir)
 	if err := runCommand(cmd, env, opts.Stdout, opts.Stderr); err != nil {
 		return Result{}, err
+	}
+	result, err := os.ReadFile(statusPath)
+	if err != nil {
+		return Result{}, fmt.Errorf("read Scribus generation status: %w", err)
+	}
+	if string(result) != "success" {
+		message := strings.TrimSpace(string(result))
+		if message == "" {
+			message = "Scribus did not report a generation result"
+		}
+		return Result{}, fmt.Errorf("Scribus generation failed: %s", message)
 	}
 
 	return outputPaths(loaded.Dir, loaded.Plan), nil
@@ -126,19 +150,22 @@ func runCommand(cmd []string, env []string, stdout, stderr io.Writer) error {
 // environment used during generation, so PDFs exported after manual review
 // embed the same usable font files.
 func OpenInScribus(slaPath string, stderr io.Writer) error {
+	if info, err := os.Stat(slaPath); err != nil {
+		return fmt.Errorf("open Scribus document: %w", err)
+	} else if !info.Mode().IsRegular() {
+		return fmt.Errorf("open Scribus document: %s is not a regular file", slaPath)
+	}
 	env, cleanup, err := scribusFontEnvironment(stderr)
 	if err != nil {
 		return err
 	}
+	defer cleanup()
 	command := exec.Command("scribus", slaPath)
 	command.Env = env
-	if err := command.Start(); err != nil {
-		cleanup()
+	command.Stdout = os.Stdout
+	command.Stderr = stderr
+	if err := command.Run(); err != nil {
 		return fmt.Errorf("launch scribus: %w", err)
 	}
-	go func() {
-		_ = command.Wait()
-		cleanup()
-	}()
 	return nil
 }

@@ -697,7 +697,7 @@ for paths, overflow, expected_flow, expected_gallery, expected_full in [
     args.update(scribus=object(), image_paths=paths, book_dir=root,
         page_size=(600, 800), margins=(20, 20, 20, 20),
         layout_mode="single_page", first_page_mode="right", chapter_heading_alignment="left",
-        chapter_heading_decoration={}, page_roles={},
+        chapter_heading_decoration={}, flow_state=None, page_roles={},
         layout_index={"forced.jpg": {"placement": "gallery", "bleed": True},
                       "ignored.jpg": {"placement": "ignore"}})
     m._render_basic_content(**args)

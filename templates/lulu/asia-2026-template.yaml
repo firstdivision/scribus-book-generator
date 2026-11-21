@@ -1,0 +1,100 @@
+document:
+  units: mm
+  layout: facing_pages
+  first_page: right
+
+page:
+  size: A4
+  orientation: landscape
+  background_color_rgb: [250, 246, 236]
+
+bleed:
+  top: 3.18
+  bottom: 3.18
+  inside: 3.18
+  outside: 3.18
+
+safety_margin:
+  top: 12.7
+  bottom: 12.7
+  inside: 12.7
+  outside: 12.7
+
+chapter_headings:
+  font:
+    family: Lora
+    style: Bold
+    size_pt: 20
+  color_rgb: [43, 64, 55]
+  borders:
+    bottom: {color_rgb: [155, 92, 70], width_pt: 1}
+  alignment: left
+  spacing_mm:
+    top: 5
+    bottom: 10
+
+callouts:
+  font:
+    family: Lora
+    style: Italic
+    size_pt: 12
+  color_rgb: [43, 64, 55]
+  background_color_rgb: [233, 241, 225]
+  border_color_rgb: [127, 154, 119]
+  border_width_pt: 0.75
+  padding_mm: 4
+  indent_mm: 5
+  spacing_before_mm: 3
+  spacing_after_mm: 5
+
+images:
+  sorting: date-ascending
+  border:
+    color_rgb: [255, 252, 245]
+    width_pt: 11
+  spacing_mm:
+    top: 5
+    bottom: 5
+    inside: 5
+    outside: 5
+  sizing:
+    max_width_mm: 120
+    max_height_mm: 120
+  placement:
+    snap_to_edge: true
+    snap_target: content_area
+    allowed_edges:
+      - outside
+      - inside
+      - top
+      - bottom
+    preferred_edges:
+      - outside
+      - inside
+      - top
+      - bottom
+    edge_selection: random
+    edge_gap_mm: 0
+  leftovers:
+    gallery_columns: 3
+
+page_numbers:
+  enabled: true
+  start_on_page: 1
+  start_number: 1
+  format: arabic
+  position: bottom_outside
+  font:
+    family: Lora
+    style: Regular
+    size_pt: 9
+  color_rgb: [77, 89, 80]
+  offset_mm:
+    top: 7
+    bottom: 7
+    inside: 10
+    outside: 10
+  hide_on:
+    - chapter_opening
+    - full_page_image
+    - blank

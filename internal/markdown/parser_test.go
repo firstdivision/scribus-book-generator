@@ -3,6 +3,7 @@ package markdown
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -63,5 +64,43 @@ func TestParseFileRejectsAdditionalH1(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "additional H1 heading on line 5") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseCallouts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "chapter.md")
+	content := "```callout\n first line\n\n# inside\n```\n# Title\nBody\n```callout\nLast\n```\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	chapter, err := ParseFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Block{
+		{Kind: "callout", Text: " first line\n\n# inside"},
+		{Kind: "heading", Text: "Title"},
+		{Kind: "paragraph", Text: "Body"},
+		{Kind: "callout", Text: "Last"},
+	}
+	if !reflect.DeepEqual(chapter.Blocks, want) {
+		t.Fatalf("got blocks %#v; want %#v", chapter.Blocks, want)
+	}
+}
+
+func TestParseInvalidCallouts(t *testing.T) {
+	for _, tc := range []struct{ text, message string }{
+		{"```callout\n\n```\n", "empty callout on line 1"},
+		{"```callout\ntext\n", "unclosed callout on line 1"},
+		{"```callout\n```callout\n", "nested callout on line 2"},
+		{"\n\n```callout\ntext\n", "unclosed callout on line 3"},
+	} {
+		path := filepath.Join(t.TempDir(), "chapter.md")
+		if err := os.WriteFile(path, []byte(tc.text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ParseFile(path); err == nil || !strings.Contains(err.Error(), tc.message) {
+			t.Fatalf("got error %v, want %q", err, tc.message)
+		}
 	}
 }

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import os
 import random
 import sys
 from pathlib import Path
@@ -260,30 +261,179 @@ def _image_dimensions_compat(image_path: Path):
 	return 0, 0
 
 
-def _parse_chapter_markdown(chapter_path: Path):
+def _parse_chapter_blocks(chapter_path: Path):
 	title = "Untitled Chapter"
 	title_found = False
-	paragraphs = []
+	blocks = []
+	callout = None
+	callout_line = None
 
 	for line_number, raw_line in enumerate(chapter_path.read_text(encoding="utf-8").splitlines(), start=1):
 		line = raw_line.strip()
-		if not line:
+		if callout is not None:
+			if line == "```callout":
+				raise RuntimeError(f"{chapter_path}: nested callout on line {line_number}")
+			if line == "```":
+				text = "\n".join(callout)
+				if not text.strip():
+					raise RuntimeError(f"{chapter_path}: empty callout on line {callout_line}")
+				blocks.append(("callout", text))
+				callout = None
+				callout_line = None
+			else:
+				callout.append(raw_line)
 			continue
-		if line.startswith("# "):
+		if line == "```callout":
+			callout = []
+			callout_line = line_number
+		elif line.startswith("# "):
 			if title_found:
 				raise RuntimeError(f"{chapter_path}: additional H1 heading on line {line_number}; only the first H1 may be a chapter title")
-			parsed_title = line[2:].strip()
-			if not parsed_title:
+			title = line[2:].strip()
+			if not title:
 				raise RuntimeError(f"{chapter_path}: chapter title on line {line_number} must be non-empty")
-			title = parsed_title
 			title_found = True
-			continue
-		paragraphs.append(line)
+			blocks.append(("heading", title))
+		elif line:
+			blocks.append(("paragraph", line))
+
+	if callout is not None:
+		raise RuntimeError(f"{chapter_path}: unclosed callout on line {callout_line}")
+	return title, blocks
+
+
+def _parse_chapter_markdown(chapter_path: Path):
+	title, blocks = _parse_chapter_blocks(chapter_path)
+	if any(kind == "callout" for kind, _ in blocks):
+		raise RuntimeError(f"{chapter_path}: callout rendering is not yet supported")
+	paragraphs = [text for kind, text in blocks if kind == "paragraph"]
 
 	body_text = "\n\n".join(paragraphs)
 	if not body_text:
 		body_text = " "
 	return title, body_text
+
+
+def _callout_visible_text(scribus, frame_name):
+	scribus.layoutText(frame_name)
+	return scribus.getFrameText(frame_name).replace("\r", "\n")
+
+
+def _callout_color(scribus, rgb):
+	name = f"callout_{rgb[0]}_{rgb[1]}_{rgb[2]}"
+	if name not in scribus.getColorNames():
+		scribus.defineColorRGB(name, rgb[0], rgb[1], rgb[2])
+	return name
+
+
+def _callout_available_area(content_rect, cursor_y, exclusion, indent, padding, border_width):
+	"""Find an image-free vertical band without moving backward in the story."""
+	left, top, width, height = content_rect
+	stroke = border_width / 2.0
+	left += indent + stroke
+	right = content_rect[0] + width - indent - stroke
+	bottom = top + height - stroke
+	y = max(cursor_y, top + stroke)
+	min_width = 2 * padding
+	min_height = 2 * padding
+	if right - left <= min_width:
+		raise RuntimeError("Callout content area is too narrow for its indentation, padding and border")
+
+	if exclusion is None:
+		return (left, y, right - left, bottom - y) if bottom - y > min_height else None
+
+	ex, ey, ew, eh = exclusion
+	ex -= stroke
+	ey -= stroke
+	er = ex + ew + 2 * stroke
+	eb = ey + eh + 2 * stroke
+	if er <= left or ex >= right or eb <= y or ey >= bottom:
+		return (left, y, right - left, bottom - y) if bottom - y > min_height else None
+
+	if y < ey and ey - y > min_height:
+		return left, y, right - left, ey - y
+	y = max(y, ey)
+	if y < eb:
+		sides = [(left, min(right, ex) - left), (max(left, er), right - max(left, er))]
+		x, available_width = max(sides, key=lambda side: side[1])
+		if available_width > min_width and min(bottom, eb) - y > min_height:
+			return x, y, available_width, min(bottom, eb) - y
+		y = eb
+	return (left, y, right - left, bottom - y) if bottom - y > min_height else None
+
+
+def _fit_story_segment(scribus, text, frame, width, max_height, min_height, apply_text_style=None):
+	visible = _callout_visible_text(scribus, frame)
+	if not text.startswith(visible):
+		raise RuntimeError(f"Text frame {frame} changed the visible text")
+	if scribus.textOverflows(frame):
+		if not visible:
+			scribus.deleteObject(frame)
+			return "", 0
+		scribus.setText(visible, frame)
+		if apply_text_style is not None:
+			apply_text_style()
+		_callout_visible_text(scribus, frame)
+		if scribus.textOverflows(frame):
+			raise RuntimeError(f"Text frame {frame} lost its visible text")
+	else:
+		if visible != text:
+			raise RuntimeError(f"Text frame {frame} did not expose all its text")
+
+	low = max(0.1, min_height)
+	high = max_height
+	for _ in range(18):
+		mid = (low + high) / 2
+		scribus.sizeObject(width, mid, frame)
+		_callout_visible_text(scribus, frame)
+		if scribus.textOverflows(frame):
+			low = mid
+		else:
+			high = mid
+	scribus.sizeObject(width, high, frame)
+	actual = _callout_visible_text(scribus, frame)
+	if scribus.textOverflows(frame) or actual != visible:
+		raise RuntimeError(f"Text frame {frame} could not be fitted safely")
+	return visible, high
+
+
+def _layout_callout_segment(scribus, text, bounds, style, frame_name):
+	"""Lay out one editable callout segment; return its consumed text and height."""
+	x, y, width, max_height = bounds
+	padding = style["padding_points"]
+	if width <= 2 * padding:
+		raise RuntimeError(f"Callout frame {frame_name} is too narrow for its padding")
+	if max_height <= 2 * padding:
+		return "", 0
+	frame = scribus.createText(x, y, width, max_height, frame_name)
+	scribus.setTextDistances(padding, padding, padding, padding, frame)
+	scribus.setText(text, frame)
+	def apply_text_style():
+		scribus.setFont(style["font_name"], frame)
+		scribus.setFontSize(style["font_size_pt"], frame)
+		scribus.setTextColor(_callout_color(scribus, style["color_rgb"]), frame)
+	apply_text_style()
+	background = style["background_color_rgb"]
+	scribus.setFillColor(_callout_color(scribus, background) if background is not None else "None", frame)
+	border_width = style["border_width_pt"]
+	scribus.setLineColor(_callout_color(scribus, style["border_color_rgb"]) if border_width else "None", frame)
+	if border_width:
+		scribus.setLineWidth(border_width, frame)
+	return _fit_story_segment(scribus, text, frame, width, max_height, 2 * padding, apply_text_style)
+
+
+def _layout_prose_segment(scribus, text, bounds, frame_name, wrap_frame=None):
+	x, y, width, max_height = bounds
+	if width <= 0 or max_height <= 0:
+		return "", 0
+	frame = scribus.createText(x, y, width, max_height, frame_name)
+	scribus.setText(text, frame)
+	if wrap_frame is not None:
+		scribus.deselectAll()
+		scribus.selectObject(wrap_frame)
+		scribus.moveSelectionToFront()
+		scribus.deselectAll()
+	return _fit_story_segment(scribus, text, frame, width, max_height, 0)
 
 
 def _create_text_frame_compat(scribus, x, y, width, height, name):
@@ -1407,6 +1557,20 @@ def _place_chapter_image(scribus, image_path, image_index, chapter_index, page_n
 	else:
 		_set_text_flow_mode_compat(scribus, image_frame)
 
+	if is_full_page:
+		return (0.0, 0.0, page_width, page_height)
+	border_outset = image_border_width_pt_used / 2.0
+	exclusion_left = image_x - max(image_spacing_left, border_outset)
+	exclusion_top = image_y - max(image_spacing_top_used, border_outset)
+	exclusion_right = image_x + frame_width + max(image_spacing_right, border_outset)
+	exclusion_bottom = image_y + frame_height + max(image_spacing_bottom_used, border_outset)
+	return (
+		exclusion_left,
+		exclusion_top,
+		exclusion_right - exclusion_left,
+		exclusion_bottom - exclusion_top,
+	)
+
 
 def _place_full_page_image(scribus, image_path, image_index, chapter_index, page_number, page_size, margins, layout_mode, first_page_mode, bleed_inside, bleed_outside, bleed_top, bleed_bottom, image_border_rgb, image_border_width_pt, layout_index, book_dir, page_roles):
 	print(f"placing full-page image {image_path.name} into page {page_number}")
@@ -1525,7 +1689,156 @@ def _decorate_chapter_heading(scribus, frame, x, y, width, height, settings):
 		scribus.setLineWidth(0, name)
 
 
-def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_index, start_page, page_size, margins, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, chapter_heading_font_size_pt, chapter_heading_alignment, chapter_heading_spacing_top, chapter_heading_spacing_bottom, image_border_rgb, image_border_width_pt, image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside, image_max_width, image_max_height, image_snap_to_edge, image_snap_target, image_allowed_edges, image_preferred_edges, image_edge_selection, image_edge_gap, gallery_columns, layout_index, book_dir, page_roles, chapter_heading_decoration=None):
+def _render_ordered_flow(scribus, blocks, image_paths, chapter_index, start_page, job, book_dir, layout_index, page_roles):
+	page = job["page"]
+	page_size = tuple(page["size_points"])
+	page_width, page_height = _document_page_size_compat(scribus, page_size)
+	margin_top, margin_left, margin_right, margin_bottom = page["margins_points"]
+	content_width = page_width - margin_left - margin_right
+	content_bottom = page_height - margin_bottom
+	layout_mode, first_page_mode = page["layout"], page["first_page"]
+	background = _as_rgb(page.get("background_rgb"))
+	bleed = job["bleed_points"]
+	headings = job["chapter_headings"]
+	images = job["images"]
+	spacing = images["spacing_points"]
+	callouts = job["callouts"]
+	if callouts["font_name"] not in scribus.getFontNames():
+		raise RuntimeError(f"Configured callout font '{callouts['font_name']}' is not available in Scribus")
+	if content_width <= 0 or content_bottom <= margin_top:
+		raise RuntimeError(f"Chapter {chapter_index} has no usable content area")
+
+	all_images = _placeable_images(image_paths, layout_index, book_dir)
+	flow_images = [
+		path for path in all_images
+		if not _image_is_gallery(_resolve_image_instruction(layout_index, book_dir, path))
+		and not _image_is_full_page(_resolve_image_instruction(layout_index, book_dir, path))
+	]
+	current_page = start_page
+	placed_count = 0
+	in_flow_index = 0
+	cursor = margin_top
+	exclusion = None
+	wrap_frame = None
+	frame_index = 0
+	title_height = max(headings["font_size_pt"] * 1.5, headings["font_size_pt"] + 4.0)
+	opening_body_top = margin_top + headings["spacing_points"]["top"] + title_height + headings["spacing_points"]["bottom"]
+
+	def place_page_image():
+		nonlocal placed_count, in_flow_index, exclusion, wrap_frame
+		exclusion = None
+		wrap_frame = None
+		if in_flow_index >= len(flow_images):
+			return
+		body_top = opening_body_top if current_page == start_page else margin_top
+		if body_top >= content_bottom:
+			raise RuntimeError(f"Chapter {chapter_index} has no space for an opening image")
+		placed_count += 1
+		exclusion = _place_chapter_image(
+			scribus, flow_images[in_flow_index], placed_count, chapter_index, current_page,
+			page_size, tuple(page["margins_points"]), layout_mode, first_page_mode,
+			bleed["inside"], bleed["outside"], bleed["top"], bleed["bottom"],
+			body_top, content_bottom - body_top, tuple(images["border_rgb"]), images["border_width_pt"],
+			spacing["top"], spacing["bottom"], spacing["inside"], spacing["outside"],
+			images["max_width_points"], images["max_height_points"], images["snap_to_edge"],
+			images["snap_target"], images.get("allowed_edges") or [], images.get("preferred_edges") or [],
+			images.get("edge_selection") or "preferred", images["edge_gap_points"],
+			layout_index, book_dir, page_roles,
+		)
+		wrap_frame = f"chapter_{chapter_index}_image_{placed_count}_wrap"
+		in_flow_index += 1
+
+	def next_page():
+		nonlocal current_page, cursor
+		current_page = _append_body_page_compat(
+			scribus, current_page, "body", layout_mode, first_page_mode, background,
+			bleed["inside"], bleed["outside"], bleed["top"], bleed["bottom"], page_size, page_roles,
+		)
+		_goto_page_compat(scribus, current_page)
+		cursor = margin_top
+		place_page_image()
+
+	place_page_image()
+	ordered = []
+	for kind, text in blocks:
+		if kind == "paragraph" and ordered and ordered[-1][0] == "paragraph":
+			ordered[-1] = ("paragraph", ordered[-1][1] + "\n\n" + text)
+		else:
+			ordered.append((kind, text))
+
+	for kind, text in ordered:
+		if kind == "heading":
+			cursor += headings["spacing_points"]["top"]
+			while True:
+				if exclusion is not None:
+					ex, ey, ew, eh = exclusion
+					if ex < margin_left + content_width and ex + ew > margin_left and cursor < ey + eh and cursor + title_height > ey:
+						cursor = ey + eh
+				if cursor + title_height <= content_bottom:
+					break
+				if exclusion is None and cursor <= margin_top + headings["spacing_points"]["top"]:
+					raise RuntimeError(f"Chapter {chapter_index} heading cannot fit on a page")
+				next_page()
+				cursor += headings["spacing_points"]["top"]
+			frame = scribus.createText(margin_left, cursor, content_width, title_height, f"chapter_{chapter_index}_title")
+			_decorate_chapter_heading(scribus, frame, margin_left, cursor, content_width, title_height, headings)
+			scribus.setText(text, frame)
+			alignment = _resolve_chapter_heading_alignment(
+				headings["alignment"], _page_is_right_compat(layout_mode, first_page_mode, current_page),
+			)
+			_set_paragraph_style_compat(scribus, frame, _chapter_heading_style_name(alignment))
+			scribus.layoutText(frame)
+			if scribus.textOverflows(frame):
+				raise RuntimeError(f"Chapter {chapter_index} heading does not fit its frame")
+			cursor += title_height + headings["spacing_points"]["bottom"]
+			continue
+
+		if kind not in ("paragraph", "callout"):
+			raise RuntimeError(f"Chapter {chapter_index} contains unknown block kind {kind!r}")
+		if kind == "callout":
+			cursor += callouts["spacing_before_points"]
+		remaining = text
+		while remaining:
+			frame_index += 1
+			name = f"chapter_{chapter_index}_{kind}_{frame_index}"
+			if kind == "callout":
+				area = _callout_available_area(
+					(margin_left, margin_top, content_width, content_bottom - margin_top),
+					cursor, exclusion, callouts["indent_points"], callouts["padding_points"], callouts["border_width_pt"],
+				)
+				if area is None:
+					if cursor <= margin_top and exclusion is None:
+						raise RuntimeError(f"Chapter {chapter_index} callout cannot fit on an empty page")
+					next_page()
+					continue
+				consumed, height = _layout_callout_segment(scribus, remaining, area, callouts, name)
+				if not consumed:
+					cursor = area[1] + area[3] + callouts["border_width_pt"] / 2
+					if cursor >= content_bottom and exclusion is None and area[1] <= margin_top + callouts["border_width_pt"] / 2:
+						raise RuntimeError(f"Chapter {chapter_index} callout cannot fit on an empty page")
+					continue
+				cursor = area[1] + height + callouts["border_width_pt"] / 2
+			else:
+				if cursor >= content_bottom:
+					next_page()
+					continue
+				consumed, height = _layout_prose_segment(
+					scribus, remaining, (margin_left, cursor, content_width, content_bottom - cursor), name, wrap_frame,
+				)
+				if not consumed:
+					if cursor <= margin_top and exclusion is None:
+						raise RuntimeError(f"Chapter {chapter_index} text cannot fit on an empty page")
+					next_page()
+					continue
+				cursor += height
+			remaining = remaining[len(consumed):]
+		if kind == "callout":
+			cursor += callouts["spacing_after_points"]
+
+	return current_page, placed_count, flow_images, in_flow_index, all_images
+
+
+def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_index, start_page, page_size, margins, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, chapter_heading_font_size_pt, chapter_heading_alignment, chapter_heading_spacing_top, chapter_heading_spacing_bottom, image_border_rgb, image_border_width_pt, image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside, image_max_width, image_max_height, image_snap_to_edge, image_snap_target, image_allowed_edges, image_preferred_edges, image_edge_selection, image_edge_gap, gallery_columns, layout_index, book_dir, page_roles, chapter_heading_decoration=None, flow_state=None):
 	page_width, page_height = _document_page_size_compat(scribus, page_size)
 	margin_top, margin_left, margin_right, margin_bottom = margins
 
@@ -1536,6 +1849,20 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 	chapter_opening_body_height = page_height - chapter_opening_body_top - margin_bottom
 	continuation_body_top = margin_top
 	continuation_body_height = page_height - continuation_body_top - margin_bottom
+
+	def finish(state):
+		return _finish_chapter_images(
+			scribus, state, chapter_index, page_size, margins, layout_mode, first_page_mode,
+			page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom,
+			continuation_body_top, continuation_body_height, image_border_rgb, image_border_width_pt,
+			image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside,
+			image_max_width, image_max_height, image_snap_to_edge, image_snap_target, image_allowed_edges,
+			image_preferred_edges, image_edge_selection, image_edge_gap, gallery_columns, layout_index,
+			book_dir, page_roles,
+		)
+
+	if flow_state is not None:
+		return finish(flow_state)
 
 	title_frame = _create_text_frame_compat(
 		scribus,
@@ -1676,6 +2003,11 @@ def _render_basic_content(scribus, title_text, body_text, image_paths, chapter_i
 		body_frames.append(next_frame)
 		max_extra_pages -= 1
 
+	return finish((current_page, placed_count, placeable_images, in_flow_index, all_placeable_images))
+
+
+def _finish_chapter_images(scribus, state, chapter_index, page_size, margins, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, continuation_body_top, continuation_body_height, image_border_rgb, image_border_width_pt, image_spacing_top, image_spacing_bottom, image_spacing_inside, image_spacing_outside, image_max_width, image_max_height, image_snap_to_edge, image_snap_target, image_allowed_edges, image_preferred_edges, image_edge_selection, image_edge_gap, gallery_columns, layout_index, book_dir, page_roles):
+	current_page, placed_count, placeable_images, in_flow_index, all_placeable_images = state
 	placed_in_flow = set(placeable_images[:in_flow_index])
 	leftover_images = [path for path in all_placeable_images if path not in placed_in_flow]
 	leftover_full_page = []
@@ -1889,9 +2221,13 @@ def main() -> int:
 		chapter_path = _first_markdown_file(chapter_dir)
 		if chapter_path is None:
 			continue
-		chapter_title, chapter_body = _parse_chapter_markdown(chapter_path)
+		chapter_title, chapter_blocks = _parse_chapter_blocks(chapter_path)
+		has_callouts = any(kind == "callout" for kind, _ in chapter_blocks)
+		if has_callouts and not any(kind == "heading" for kind, _ in chapter_blocks):
+			chapter_blocks.insert(0, ("heading", chapter_title))
+		chapter_body = "\n\n".join(text for kind, text in chapter_blocks if kind == "paragraph") or " "
 		chapter_images = _image_files(chapter_dir)
-		chapters.append((chapter_title, chapter_body, chapter_images))
+		chapters.append((chapter_title, chapter_body, chapter_images, chapter_blocks if has_callouts else None))
 
 	if not chapters:
 		print(f"no markdown chapter files found under: {chapters_dir}", file=sys.stderr)
@@ -1930,12 +2266,18 @@ def main() -> int:
 		current_page = 1
 		page_roles = {1: "chapter_opening"}
 		for index, chapter_data in enumerate(chapters, start=1):
-			chapter_title, chapter_body, chapter_images = chapter_data
+			chapter_title, chapter_body, chapter_images, chapter_blocks = chapter_data
 			print(f"rendering chapter {index}/{len(chapters)}: '{chapter_title}' ({len(chapter_images)} images)")
 			if index > 1:
 				current_page = _start_chapter_on_right_page_compat(scribus, current_page, layout_mode, first_page_mode, page_background_rgb, bleed_inside, bleed_outside, bleed_top, bleed_bottom, page_size, page_roles)
 				_goto_page_compat(scribus, current_page)
 
+			flow_state = None
+			if chapter_blocks is not None:
+				flow_state = _render_ordered_flow(
+					scribus, chapter_blocks, chapter_images, index, current_page, job,
+					book_dir, layout_index, page_roles,
+				)
 			current_page = _render_basic_content(
 				scribus,
 				chapter_title,
@@ -1975,6 +2317,7 @@ def main() -> int:
 				book_dir,
 				page_roles,
 				chapter_heading_decoration=headings,
+				flow_state=flow_state,
 			)
 
 		print(f"rendering page numbers across {current_page} pages")
@@ -2016,7 +2359,7 @@ def main() -> int:
 					chapter_heading_font_name,
 					page_number_font_name,
 					page_number_font_family,
-				],
+				] + ([job["callouts"]["font_name"]] if any(chapter[3] is not None for chapter in chapters) else []),
 			)
 			pdf.save()
 		else:
@@ -2024,6 +2367,7 @@ def main() -> int:
 			return 1
 	except Exception as exc:  # pragma: no cover - runtime integration path
 		print(f"Scribus API call failed: {exc}", file=sys.stderr)
+		_write_generation_status(f"Scribus API call failed: {exc}")
 		return 1
 
 	print(f"wrote Scribus document: {sla_path}")
@@ -2031,5 +2375,20 @@ def main() -> int:
 	return 0
 
 
+def _write_generation_status(message):
+	status_path = os.environ.get("BOOKGEN_SCRIBUS_STATUS")
+	if status_path:
+		Path(status_path).write_text(message, encoding="utf-8")
+
+
 if __name__ == "__main__":
-	raise SystemExit(main())
+	try:
+		result = main()
+	except Exception as exc:
+		_write_generation_status(f"Scribus script failed: {exc}")
+		raise
+	if result == 0:
+		_write_generation_status("success")
+	elif os.environ.get("BOOKGEN_SCRIBUS_STATUS") and not Path(os.environ["BOOKGEN_SCRIBUS_STATUS"]).read_text(encoding="utf-8"):
+		_write_generation_status(f"Scribus script returned {result}")
+	raise SystemExit(result)

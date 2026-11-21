@@ -17,12 +17,23 @@ func main() {
 }
 
 func run(args []string) int {
+	if len(args) > 0 && args[0] == "open" {
+		if len(args) != 2 {
+			fmt.Fprintln(os.Stderr, "usage: bookgen open <document.sla>")
+			return 2
+		}
+		if err := renderer.OpenInScribus(args[1], os.Stderr); err != nil {
+			fmt.Fprintf(os.Stderr, "bookgen: %v\n", err)
+			return 1
+		}
+		return 0
+	}
 	fs := flag.NewFlagSet("bookgen", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	verbose := fs.Bool("v", false, "print resolved configuration and chapter inventory")
 	convertHEIC := fs.Bool("convert-heic", false, "convert HEIC images in the book's chapter folders to JPG before layout")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: %s [-v] [--convert-heic] <book-dir>\n", filepath.Base(os.Args[0]))
+		fmt.Fprintf(os.Stderr, "usage: %s [-v] [--convert-heic] <book-dir>\n       %s open <document.sla>\n", filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {

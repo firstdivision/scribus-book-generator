@@ -111,7 +111,6 @@ func loadChapter(bookDir, name string, sorting config.ImageSorting) (Chapter, er
 		rel := filepath.Join("chapters", name, filepath.Base(markdownPath))
 		return Chapter{}, fmt.Errorf("%s: %w", rel, err)
 	}
-
 	images, err := imageFiles(chapterDir, sorting)
 	if err != nil {
 		return Chapter{}, fmt.Errorf("chapter %s: %w", name, err)

@@ -7,7 +7,6 @@
   - [Chapter Markdown](#chapter-markdown)
 - [Running The Generator](#running-the-generator)
   - [Converting HEIC Images](#converting-heic-images)
-- [Desktop GUI](#desktop-gui)
 - [Creating A Template](#creating-a-template)
 - [Template Fields](#template-fields)
   - [document](#document)
@@ -15,6 +14,7 @@
   - [bleed](#bleed)
   - [safety_margin](#safety_margin)
   - [chapter_headings](#chapter_headings)
+  - [callouts](#callouts)
   - [images](#images)
   - [book.yaml layout](#bookyaml-layout)
   - [book.yaml overrides](#bookyaml-overrides)
@@ -34,6 +34,7 @@ The generator currently:
 - styles chapter titles from the first Markdown H1 in each chapter
 - finds chapter-local images
 - creates flowing text frames across multiple pages
+- renders configurable highlighted callouts in chapter order
 - places chapter images with configurable frame styling and spacing
 - applies per-page background color
 - renders configurable page numbers
@@ -83,6 +84,25 @@ There is a point, about forty miles after the last gas station...
 
 A chapter without an H1 uses `Untitled Chapter` as its title. Additional H1 headings in the same file are rejected with a validation error; they are not treated as additional chapter titles.
 
+Use a fenced `callout` for highlighted text:
+
+````markdown
+# Chapter title
+
+```callout
+First line
+Second line
+
+Another paragraph in the same callout
+```
+
+Ordinary body text follows.
+````
+
+Callouts can appear anywhere in a chapter, including before the H1, and multiple callouts retain their source order. Their line breaks and blank lines are preserved. Empty, nested, and unclosed callouts are rejected with a file and line number. Other fence names, including `poem`, are not callout aliases.
+
+Callouts can continue across pages; every segment has its own styled, editable frame. The generator avoids image frames and fails if a segment cannot fit safely. Segments are separate frames, so edits in Scribus do not automatically reflow into later segments. Chapters without callouts continue to use the original linked body-text layout.
+
 Example `book.yaml`:
 
 ```yaml
@@ -99,7 +119,11 @@ Use `-v` to print the fully resolved configuration and the chapter inventory aft
 
 The command loads and validates the book folder (`book.yaml`, chapter markdown, and image paths), writes a Scribus job JSON under `books/<book>/out/scribus-job.json`, and runs the committed adapter in `scripts/scribus_generate.py`. It then writes `.sla` and `.pdf` files under `books/<book>/out/`. The file stem is the optional `layout.title` in `book.yaml`, or the book directory name if `title` is omitted. PDF export uses Scribus' PDF 1.3 mode and disables PDF layers so transparent artwork is flattened during export for print-upload workflows such as Lulu. It also explicitly enables embedded fonts (Scribus `fontEmbedding` mode `0`) and populates the export font list from the fonts used in the Scribus document so printers receive the required font data.
 
-Scribus treats every Type 1 font file that starts with `%!` as a hex-encoded PFA and corrupts the font when the file actually stores its eexec section in binary (for example Debian/Ubuntu's `fonts-urw-base35` `*.t1` files such as `URWBookman-Demi.t1`). Such PDFs trigger errors like Acrobat's "Cannot extract the embedded font" and are rejected by printers such as Lulu. To avoid this, `bookgen` and the GUI's **Open .sla in Scribus** button run Scribus with a temporary fontconfig override (`FONTCONFIG_FILE`, layered on your existing configuration) that hides those broken files whenever fontconfig lists another copy of the same PostScript font (an `.otf`, `.ttf`, or `.pfb`). If a font used in the document is only available as a broken file, PDF export fails with an error that names the font and file; install an OpenType, TrueType, or `.pfb` copy or choose another font. The override needs `fc-list`; without it, only the export-time check runs. Launching Scribus yourself does not apply the override, so open reviewed documents with the GUI button before exporting the final PDF; `scripts/to-pdf.py` performs the same export-time check but cannot apply the override.
+Scribus treats every Type 1 font file that starts with `%!` as a hex-encoded PFA and corrupts the font when the file actually stores its eexec section in binary (for example Debian/Ubuntu's `fonts-urw-base35` `*.t1` files such as `URWBookman-Demi.t1`). Such PDFs trigger errors like Acrobat's "Cannot extract the embedded font" and are rejected by printers such as Lulu. To avoid this, `bookgen` runs Scribus with a temporary fontconfig override (`FONTCONFIG_FILE`, layered on your existing configuration) that hides those broken files whenever fontconfig lists another copy of the same PostScript font (an `.otf`, `.ttf`, or `.pfb`). If a font used in the document is only available as a broken file, PDF export fails with an error that names the font and file; install an OpenType, TrueType, or `.pfb` copy or choose another font. The override needs `fc-list`; without it, only the export-time check runs. Launching Scribus yourself does not apply the override; use the following command to open a document with the same protection. `scripts/to-pdf.py` performs the export-time check but cannot apply the override.
+
+```bash
+go run ./cmd/bookgen open "books/sample-book/out/The Roast to San Rosario.sla"
+```
 
 ```bash
 go run ./cmd/bookgen -v books/sample-book/
@@ -118,44 +142,6 @@ The script requires either `heif-convert` (Debian/Ubuntu package `libheif-exampl
 ```bash
 ./scripts/convert-heic.sh books/sample-book/ [--quality N] [--force]
 ```
-
-## Desktop GUI
-
-`bookgen-gui` is a Linux desktop editor (built with [Fyne](https://fyne.io)) for the same book directories the CLI consumes. It never talks to Scribus directly; it edits `book.yaml` and runs the same pipeline as `bookgen`.
-
-It can:
-
-- open an existing book directory or create a new one (`book.yaml` + `chapters/`)
-- choose the base template from every `*.yaml`/`*.yml` under the project's `templates/` directory
-- browse chapters (the first tab) and double-click one (or press **Edit chapter**) to open the chapter editor: the chapter's Markdown on the left, a thumbnail grid of every image in the chapter directory on the right. Selecting an image shows its `layout.images` fields (placement, bleed, snap edge, width/height, border); changing a field adds the image to `book.yaml` if it is not already listed, and **Reset to defaults** removes its entry again
-- edit `layout.title` and the whole `layout.images` list in order, with thumbnails, add/remove/reorder, and every per-image field
-- override any template value per book; each field shows the inherited template value next to an **Override** checkbox, and only overridden fields are written under `overrides:`
-- create chapter directories (`chapters/<n>-<slug>/text.md`), import images into a chapter, and open a chapter's Markdown or folder in the system default application
-- run generation (optionally converting HEIC first) with a live log, then open the resulting `.sla` in Scribus
-
-**Save** writes `book.yaml` and any chapter Markdown edited in the chapter editor; a chapter that had no Markdown file gets `text.md` created.
-
-Build prerequisites (cgo plus X11/OpenGL headers), on Debian/Ubuntu:
-
-```bash
-sudo apt install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev libwayland-dev
-```
-
-The binary is behind the `gui` build tag so the default `go build ./...` stays header-free:
-
-```bash
-go build -tags gui -o bookgen-gui ./cmd/bookgen-gui
-./bookgen-gui [books/sample-book]
-```
-
-The project root (the directory containing `templates/` and `scripts/`) is discovered by walking up from the opened book, remembered between runs, and can be changed with **Project root…**. The last opened book is reopened on start.
-
-Limitations:
-
-- Saving rewrites `book.yaml` from its parsed form; comments and key order in a hand-edited file are not preserved. Chapter Markdown is rewritten verbatim from the editor.
-- Thumbnails are shown for PNG, JPEG, GIF, and WebP; other formats (HEIC, SVG) show an empty preview.
-- The chapter editor is a plain text area; there is no Markdown preview.
-- The `bookgen-gui` package itself is not unit tested (it only wires `app.New()` to `internal/gui`); the `internal/gui` package is tested headlessly with Fyne's test driver.
 
 ## Creating A Template
 
@@ -360,6 +346,27 @@ Valid values:
 - `bottom`: vertical space between the title and first body paragraph, in millimeters; must be `>= 0`
 
 The renderer applies these values through text-frame geometry rather than inserting blank lines.
+
+### `callouts`
+
+Style highlighted blocks in a template or under `book.yaml` `overrides.callouts`:
+
+```yaml
+callouts:
+  font: {family: Lora, style: Italic, size_pt: 12}
+  color_rgb: [43, 64, 55]
+  background_color_rgb: [233, 241, 225]
+  border_color_rgb: [127, 154, 119]
+  border_width_pt: 0.75
+  padding_mm: 4
+  indent_mm: 5
+  spacing_before_mm: 3
+  spacing_after_mm: 5
+```
+
+`font.family` and `font.style` must be nonempty and specify an exact Scribus font face; `font.size_pt` must be finite and greater than zero. Colors must contain exactly three integers between 0 and 255. The default background is transparent; an omitted or null background inherits the prior setting. A zero border width means no border. Border width, padding, indentation and spacing must be finite and nonnegative. Indentation applies to both sides of the available content area; padding is inside each segment's frame. Callout text and border sizes are in points, and the remaining dimensions are in millimeters.
+
+Templates and book overrides inherit omitted fields individually. An installed and embeddable callout font is required only when the book contains callouts. An excessive indent or padding that leaves no room for text causes generation to fail.
 
 ### `images`
 
@@ -593,6 +600,22 @@ Notes:
 
 ## Defaults
 
+The built-in callout defaults are:
+
+```yaml
+callouts:
+  font: {family: DejaVu Sans, style: Book, size_pt: 12}
+  color_rgb: [0, 0, 0]
+  border_color_rgb: [0, 0, 0]
+  border_width_pt: 0
+  padding_mm: 3
+  indent_mm: 0
+  spacing_before_mm: 3
+  spacing_after_mm: 3
+```
+
+The default background is transparent.
+
 If `chapter_headings` is omitted entirely, the generator uses these defaults:
 
 ```yaml
@@ -637,6 +660,7 @@ The current generator is deterministic and template-driven. It is focused on:
 - chapter opening pages
 - configurable chapter-title typography, color, alignment, and spacing
 - flowing body text
+- configurable, multi-page callouts
 - chapter-local image placement
 - page backgrounds
 - page numbering

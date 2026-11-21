@@ -21,6 +21,7 @@ type scribusJob struct {
 	BleedPoints     scribusJobSides           `json:"bleed_points"`
 	PageNumbers     scribusJobPageNumbers     `json:"page_numbers"`
 	ChapterHeadings scribusJobChapterHeadings `json:"chapter_headings"`
+	Callouts        scribusJobCallouts        `json:"callouts"`
 	Images          scribusJobImages          `json:"images"`
 	// Layout is the book.yaml layout object (title plus per-image overrides).
 	Layout json.RawMessage `json:"layout"`
@@ -51,6 +52,19 @@ type scribusJobSides struct {
 type scribusJobSpacing struct {
 	Top    float64 `json:"top"`
 	Bottom float64 `json:"bottom"`
+}
+
+type scribusJobCallouts struct {
+	FontName           string  `json:"font_name"`
+	FontSizePt         float64 `json:"font_size_pt"`
+	ColorRGB           [3]int  `json:"color_rgb"`
+	BackgroundColorRGB *[3]int `json:"background_color_rgb"`
+	BorderColorRGB     [3]int  `json:"border_color_rgb"`
+	BorderWidthPt      float64 `json:"border_width_pt"`
+	PaddingPoints      float64 `json:"padding_points"`
+	IndentPoints       float64 `json:"indent_points"`
+	SpacingBefore      float64 `json:"spacing_before_points"`
+	SpacingAfter       float64 `json:"spacing_after_points"`
 }
 
 // scribusJobPageNumbers is logical numbering, type, placement, and which page
@@ -151,6 +165,18 @@ func buildScribusJob(cfg config.Config, plan layoutplan.Plan) scribusJob {
 				Top:    mmToPoints(cfg.ChapterHeadings.SpacingMM.Top),
 				Bottom: mmToPoints(cfg.ChapterHeadings.SpacingMM.Bottom),
 			},
+		},
+		Callouts: scribusJobCallouts{
+			FontName:           scribusFontName(cfg.Callouts.Font.Family, cfg.Callouts.Font.Style),
+			FontSizePt:         cfg.Callouts.Font.SizePt,
+			ColorRGB:           cfg.Callouts.ColorRGB,
+			BackgroundColorRGB: cfg.Callouts.BackgroundColorRGB,
+			BorderColorRGB:     cfg.Callouts.BorderColorRGB,
+			BorderWidthPt:      cfg.Callouts.BorderWidthPt,
+			PaddingPoints:      mmToPoints(cfg.Callouts.PaddingMM),
+			IndentPoints:       mmToPoints(cfg.Callouts.IndentMM),
+			SpacingBefore:      mmToPoints(cfg.Callouts.SpacingBeforeMM),
+			SpacingAfter:       mmToPoints(cfg.Callouts.SpacingAfterMM),
 		},
 		Images: scribusJobImages{
 			BorderRGB:     cfg.Images.Border.ColorRGB,
